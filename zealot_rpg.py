@@ -2086,12 +2086,14 @@ def build_npc_site_index():
 def _build_npc_pages():
     """Build a living NPC roster page + individual character pages"""
     rows = ''
+    built_nicks = set()
     for f in sorted(RPG_DIR.glob('*.json')):
         if f.stem in ('world', 'graveyard', 'lineage', 'songbook', 'deities', 'events', 'timeline', 'leaderboard', 'settlements', 'cult_theories', 'weather', 'realm_event', 'lore'):
             continue
         try:
             p = json.loads(f.read_text())
             nick = p.get('nick', f.stem)
+            built_nicks.add(nick)
             alive_class = 'alive' if p.get('alive', True) else 'dead'
             alive_icon = '&#x2665;' if p.get('alive', True) else '&#x2620;'
             loc = LOCATIONS.get(p.get('location', ''), {}).get('name', '?')
@@ -2112,6 +2114,14 @@ def _build_npc_pages():
                 build_npc_homepage(nick, persona=persona, player=p)
         except:
             pass
+    # Second pass: build homepages for NPC_PERSONAS entries without player files
+    # (e.g. ZealHangs bots: Pixel, CHMOD, n0va, glitchgrl, Lyric, Riff, etc.)
+    for nick, persona in NPC_PERSONAS.items():
+        if nick not in built_nicks:
+            try:
+                build_npc_homepage(nick, persona=persona, player={})
+            except:
+                pass
     role_icons = {'warrior': '&#x2694;&#xfe0f;', 'bard': '&#x1f3b5;', 'merchant': '&#x1f4b0;',
                   'priest': '&#x2721;', 'priestess': '&#x1f52e;', 'librarian': '&#x1f4be;',
                   'ghost': '&#x1f47b;', 'thief': '&#x1f5e1;&#xfe0f;', 'ranger': '&#x1f3f9;',
