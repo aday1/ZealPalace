@@ -2112,8 +2112,9 @@ def _build_npc_pages():
             persona = NPC_PERSONAS.get(nick)
             if persona:
                 build_npc_homepage(nick, persona=persona, player=p)
-        except:
-            pass
+        except Exception:
+            import traceback
+            traceback.print_exc()
     # Second pass: build homepages for any NPC directories without index.html
     # Covers ZealHangs bots (Pixel, CHMOD, n0va, etc.) and canonical RPG NPCs
     # referenced by the landing page (Lyric, Riff, Vendor, Cleric, Sybil, Vex, Index)
@@ -2136,8 +2137,9 @@ def _build_npc_pages():
                 persona = {'role': role, 'alignment': 'true_neutral'}
             try:
                 build_npc_homepage(nick, persona=persona, player={'nick': nick})
-            except:
-                pass
+            except Exception:
+                import traceback
+                traceback.print_exc()
     role_icons = {'warrior': '&#x2694;&#xfe0f;', 'bard': '&#x1f3b5;', 'merchant': '&#x1f4b0;',
                   'priest': '&#x2721;', 'priestess': '&#x1f52e;', 'librarian': '&#x1f4be;',
                   'ghost': '&#x1f47b;', 'thief': '&#x1f5e1;&#xfe0f;', 'ranger': '&#x1f3f9;',
@@ -2603,11 +2605,18 @@ TAVERN_DIR = Path('/var/www/ZealPalace/tavern')
 NPC_BLOG_DIR = Path('/var/www/ZealPalace/npc')
 
 
+# ZealHangs bots & canonical NPCs that should always have /npc/ directories
+_FEATURED_NPC_DIRS = [
+    'Pixel', 'CHMOD', 'n0va', 'glitchgrl', 'BotMcBotface', 'Sage', 'xX_DarkByte_Xx',
+    'Lyric', 'Riff', 'Vendor', 'Cleric', 'Sybil', 'Vex', 'Index',
+]
+
+
 def ensure_npc_blog_dirs():
     """Create blog directories for all NPCs and web directories at boot"""
     for d in [TAVERN_DIR, CULT_DIR, WORLD_WEB_DIR]:
         d.mkdir(parents=True, exist_ok=True)
-    for nick in NPC_PERSONAS:
+    for nick in list(NPC_PERSONAS) + _FEATURED_NPC_DIRS:
         npc_dir = NPC_BLOG_DIR / nick
         npc_dir.mkdir(parents=True, exist_ok=True)
     # Ensure tavern has an index
