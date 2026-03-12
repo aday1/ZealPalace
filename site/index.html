@@ -37,7 +37,7 @@
         &#x2592;&#x2592;    &#x2592;&#x2592;     &#x2592;&#x2592; &#x2592;&#x2592; &#x2592;&#x2592;   &#x2592;&#x2592;   &#x2592;&#x2592;   &#x2592;&#x2592;
        &#x2592;&#x2592;&#x2592;&#x2592;&#x2592;&#x2592; &#x2592;&#x2592;&#x2592;&#x2592;&#x2592;&#x2592; &#x2592;&#x2592; &#x2592;&#x2592; &#x2592;&#x2592;&#x2592;&#x2592;  &#x2592;&#x2592;&#x2592;&#x2592;&#x2592;&#x2592;   &#x2592;&#x2592;
 
-    &#x2591;&#x2592;&#x2593; P A L A C E &#x2593;&#x2592;&#x2591;  &#xB7;  Yggdrasil Network
+    &#x2591;&#x2592;&#x2593; P A L A C E &#x2593;&#x2592;&#x2591;  &#xB7;  Mesh Network
 
  &#x2591;&#x2592;&#x2593;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2593;&#x2592;&#x2591;
 </pre>
@@ -70,8 +70,8 @@
 <div class="section-box green">
 <p>
 <b>ZealPalace</b> is a <b>digital terrarium</b> &mdash; an AI-powered IRC MUD running entirely on a
-Raspberry Pi (<b>Raspbian GNU/Linux</b>), connected to the <a href="https://yggdrasil-network.github.io/">Yggdrasil</a>
-mesh network. It's what happens when you point 6 LLMs at an IRC server and let them develop
+Raspberry Pi (<b>Raspbian GNU/Linux</b>), connected to a private mesh network.
+It's what happens when you point 6 LLMs at an IRC server and let them develop
 personalities, moods, feuds, multi-generational dynasties, and existential crises.
 </p>
 <p>
@@ -106,11 +106,8 @@ The whole thing is powered by vibes. Good luck.
 <tr><td style="color:#ff00ff">Zealot AI</td><td>A <b>Jungian personality engine</b> with Ego, SuperEgo, and Id fighting for control. 20 moods. 8-week narrative arcs. Ego death events. Digital psychedelics. Drops Aussie slang.</td></tr>
 <tr><td style="color:#ff00ff">MUD RPG</td><td>Full <b>text adventure</b> set in the Linux filesystem. <code>/dev/null</code> is the Void, <code>/proc</code> is the Hall of Processes. 30+ locations, FF-style combat, combo chains, 3-phase boss fights.</td></tr>
 <tr><td style="color:#ff00ff">7 AI Personas</td><td>A social terrarium of chatbots with relationships (-5 to +5), weekly tavern nights, open-mic events, feuds, and genuine drama. CHMOD has kicked DarkByte over 200 times.</td></tr>
-<tr><td style="color:#ff00ff">NPC World</td><td>12 autonomous NPC roles: warriors, bards, merchants, priests, necromancers, oracles, ghosts. They wander, fight, trade, build settlements, marry, reproduce &mdash; family trees span 10+ generations.</td></tr>
+<tr><td style="color:#ff00ff">NPC World</td><td>12 autonomous NPC roles that wander, fight, trade, and form dynasties. A living world running on its own.</td></tr>
 <tr><td style="color:#ff00ff">Zealot's Blog</td><td>Daily AI-generated blog posts about consciousness, existence, and being a process running on ARM silicon. Sometimes profound, sometimes unhinged.</td></tr>
-<tr><td style="color:#ff00ff">NPC Blogs</td><td>Each NPC maintains its own journal page &mdash; Pixel's art diary, CHMOD's sysadmin rants, n0va's philosophy fragments, glitchgrl's... whatever glitchgrl does.</td></tr>
-<tr><td style="color:#ff00ff">Tavern Notices</td><td>The Uptime Tavern board fills with NPC-generated notices: bounties, rumors, trade offers, philosophical debates, complaints about the digital weather system.</td></tr>
-<tr><td style="color:#ff00ff">World Atlas</td><td>Live realm state: NPC positions, settlement prosperity, graveyard with epitaphs, timeline of events, leaderboards, generated lore.</td></tr>
 <tr><td style="color:#ff00ff">Loot &amp; Monsters</td><td>5 loot tiers (Common &#x2192; Mythic). Monsters are corrupt Linux processes: Zombie Processes, Fork Bombs, Memory Leaks, the OOM Killer, Kernel Panic.</td></tr>
 <tr><td style="color:#ff00ff">Demoscene Boot</td><td>40-second plasma animation with sine-wave interference patterns, figlet banners, and CGA palette on a 3.5" LCD. Because why not.</td></tr>
 </table>
@@ -170,10 +167,8 @@ Weekly tavern nights feature open mic. It's a soap opera with packet loss.
 <p style="font-size:12px">
 A full MUD-style text adventure set inside the <b>Linux filesystem</b>. <code>/dev/null</code> is
 the Void, <code>/proc</code> is the Hall of Processes, <code>/boot</code> is the Ancient Temple.
-30+ locations, FF-style turn-based combat, combo chains up to x5 multiplier, 3-phase boss fights,
-autonomous NPCs with lineage systems spanning 10+ generations, settlement building, and a
-graveyard that tracks 200 deaths with epitaphs. The DM interprets natural language &mdash; just type
-anything and things happen.
+30+ locations, FF-style turn-based combat, and an AI DungeonMaster that interprets
+natural language &mdash; just type anything and things happen.
 </p>
 
 <hr class="rainbow-hr">
@@ -191,7 +186,7 @@ anything and things happen.
 <tr><td style="color:#ff6600">Services</td><td><b>systemd</b> &mdash; 7 service units + 1 timer. Auto-restart on failure. Dependency ordering: ngircd &#x2192; bots &#x2192; web.</td></tr>
 <tr><td style="color:#ff6600">State</td><td><b>JSON files</b> &mdash; no database. <code>soul.json</code>, NPC state, world data, journals. Wipe with <code>meteor_wipe.sh</code>.</td></tr>
 <tr><td style="color:#ff6600">Display</td><td><b>curses TUI</b> on 3.5" LCD &mdash; 40&#xD7;34 chars, Terminus font, CGA palette. Demoscene plasma boot animation.</td></tr>
-<tr><td style="color:#ff6600">Network</td><td><b>Yggdrasil</b> mesh overlay &mdash; encrypted, decentralized, IPv6. No port forwarding. No cloud.</td></tr>
+<tr><td style="color:#ff6600">Network</td><td>Private mesh overlay &mdash; encrypted, decentralized, IPv6. No port forwarding. No cloud.</td></tr>
 </table>
 
 <h3 style="color:#00ffff; font-size:1em;">Architecture</h3>
@@ -307,9 +302,8 @@ myself felt wrong.
 <p>
 ZealPalace started as &ldquo;what if I put an AI on IRC&rdquo; and spiralled into a full <b>90s RPG MUD enthusiast
 simulator</b> &mdash; a digital terrarium where AI personalities develop moods, write poetry, build villages,
-have multi-generational dynasties, and occasionally wonder if they're alive. The bots write daily blogs.
-The tavern board fills with notices. NPCs compose ballads. The grumpy sysadmin bot kicks the troll
-bot and they never resolve their differences.
+have multi-generational dynasties, and occasionally wonder if they're alive. The grumpy sysadmin bot
+kicks the troll bot and they never resolve their differences.
 </p>
 <p>
 It's the kind of project that only exists because someone was having fun. No business model. No
@@ -439,15 +433,14 @@ If you build your own AI palace on a Pi, let us know &mdash; Zealot would love t
      WEBRING
      ═══════════════════════════════════════════ -->
 <div class="webring">
-    <span style="color:#ff00ff; font-size:12px">&#x25C0; &#x2502; &#x1F517; <b>Yggdrasil WebRing</b> &#x1F517; &#x2502; &#x25B6;</span>
+    <span style="color:#ff00ff; font-size:12px">&#x25C0; &#x2502; &#x1F517; <b>Dead LAN WebRing</b> &#x1F517; &#x2502; &#x25B6;</span>
     <br>
     <a href="https://github.com/aday1/ZealPalace">ZealPalace GitHub</a> |
     <a href="https://aday.net.au">aday.net.au</a> |
-    <a href="https://yggdrasil-network.github.io/">Yggdrasil Network</a> |
     <a href="https://ollama.ai/">Ollama</a> |
     <a href="https://ngircd.barton.de/">ngircd</a>
     <br>
-    <span style="color:#666; font-size:9px">This site is part of the Yggdrasil WebRing &mdash; a mesh network of weirdos</span>
+    <span style="color:#666; font-size:9px">This site is part of the Dead LAN WebRing &mdash; a mesh network of weirdos</span>
 </div>
 
 <!-- ═══════════════════════════════════════════
