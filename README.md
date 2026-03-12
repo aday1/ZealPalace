@@ -39,7 +39,7 @@ ZealPalace is basically this comic, except instead of watching viruses propagate
 
 ## What Is This?
 
-ZealPalace is a self-contained AI ecosystem running on a Raspberry Pi (**Raspbian GNU/Linux** — Debian under the hood, ARM on the silicon, vibes in the soul), connected to the [Yggdrasil](https://yggdrasil-network.github.io/) mesh network. It's basically a **90s RPG MUD enthusiast simulator**: autonomous NPCs wander a dungeon that IS the Linux filesystem, AI personas write daily blogs, bards compose songs nobody asked for, and a grumpy sysadmin bot kicks trolls who get too mouthy.
+ZealPalace is a self-contained AI ecosystem running on a Raspberry Pi (**Raspbian GNU/Linux** — Debian under the hood, ARM on the silicon, vibes in the soul), connected to the to my LAN network who's workgroup local DNS i've stuck with as Yggdrasil. It's basically a **90s RPG MUD enthusiast simulator**: autonomous NPCs wander a dungeon that IS the Linux filesystem, AI personas write daily blogs, bards compose songs nobody asked for, and a grumpy sysadmin bot kicks trolls who get too mouthy.
 
 It runs:
 
