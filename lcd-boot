@@ -1,0 +1,36 @@
+#!/bin/bash
+# lcd-boot - Boot sequence for Zealot (called from .bashrc on login)
+# Runs plasma animation, then starts tmux LCD session
+export TERM=linux
+
+# Set console font for max TFT density (8x14 Terminus = 40x34 on 320x480)
+# Only on real TTYs, not SSH
+if [ -z "$SSH_CONNECTION" ]; then
+    setfont Uni2-TerminusBold14.psf.gz 2>/dev/null
+fi
+
+# Only run plasma once per boot (use a flag file)
+BOOT_FLAG="/tmp/.zealot_plasma_done_$(id -u)"
+
+if [ ! -f "$BOOT_FLAG" ]; then
+    # Run boot plasma animation
+    python3 ~/.local/bin/boot_plasma.py 2>/dev/null
+    touch "$BOOT_FLAG"
+fi
+
+# Initialize LCD session if not running
+if ! tmux has-session -t lcd 2>/dev/null; then
+    ~/.local/bin/lcd-init >/dev/null 2>&1
+    sleep 1
+fi
+
+# Attach to LCD session
+# Physical TTY: normal attach (LCD is the right size)
+# SSH: attach read-only so we don't resize the LCD session
+if [ -n "$SSH_CONNECTION" ]; then
+    # SSH: set terminal to LCD size before attaching
+    stty rows 34 cols 40 2>/dev/null
+    exec tmux attach-session -t lcd
+else
+    exec tmux attach-session -t lcd
+fi

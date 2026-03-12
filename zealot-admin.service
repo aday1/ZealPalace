@@ -1,0 +1,15 @@
+[Unit]
+Description=ZEALOT Admin Panel - Web UI for personality editing
+After=network.target nginx.service
+Wants=nginx.service
+
+[Service]
+Type=simple
+User=aday
+ExecStart=/usr/bin/python3 /home/aday/.local/bin/zealot_admin.py
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/home/aday
+
+[Install]
+WantedBy=multi-user.target

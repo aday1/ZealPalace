@@ -1,0 +1,40 @@
+server {
+    listen 80 default_server;
+    server_name zealpalace.yggdrasil.aday.net.au _;
+
+    root /var/www/ZealPalace;
+    index index.html;
+
+    # Static site
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Blog autoindex
+    location /blog/ {
+        autoindex on;
+        autoindex_format html;
+    }
+
+    # Admin panel (proxy to zealot_admin.py on port 9666)
+    location /admin/ {
+        proxy_pass http://127.0.0.1:9666;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+    location /admin {
+        return 301 /admin/;
+    }
+
+    # Web API (proxy to zealot_web_api.py on port 8888)
+    location /api/ {
+        proxy_pass http://127.0.0.1:8888;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Soul.md as plain text
+    location = /soul.md {
+        default_type text/plain;
+    }
+}

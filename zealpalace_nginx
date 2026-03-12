@@ -1,0 +1,52 @@
+server {
+    listen 80 default_server;
+    server_name zealpalace.yggdrasil.aday.net.au 10.13.37.76;
+
+    root /var/www/ZealPalace;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location /blog/ {
+        autoindex on;
+        autoindex_format html;
+    }
+
+    location /tavern/ {
+        autoindex on;
+        autoindex_format html;
+    }
+
+    location /npc/ {
+        autoindex on;
+        autoindex_format html;
+    }
+
+    location /world/ {
+        autoindex on;
+        autoindex_format html;
+    }
+
+    location /cult/ {
+        autoindex on;
+        autoindex_format html;
+    }
+
+    location /soul.md {
+        default_type text/plain;
+    }
+
+    location /admin/ {
+        proxy_pass http://127.0.0.1:9666/admin/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8888/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}

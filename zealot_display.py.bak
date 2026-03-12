@@ -1,0 +1,583 @@
+#!/usr/bin/env python3
+"""ZEALOT Display - Merged IRC + Avatar curses TUI (auto-sizing)
+
+Layout (dynamic, fits any terminal size):
+Row 0-1:   Animated plasma header with ZEALOT title + scrolling info
+Row 2-9:   ASCII avatar (8 frames, animated eyes/spinner)
+Row 10-11: Mood + thought / dream (word-wrapped, 2 lines)
+Row 12:    Separator
+Row 13-N:  IRC scrollback (word-wrapped, colored) — all channels merged
+Last row:  Input prompt
+"""
+import curses, time, math, os, sys, json, random, textwrap, socket
+from pathlib import Path
+from datetime import datetime
+
+os.environ['TERM'] = 'linux'
+
+# Dimensions auto-detected from terminal
+MEM_FILE  = Path.home() / '.cache' / 'zealot' / 'state.json'
+IRC_LOG   = Path.home() / '.cache' / 'zealot' / 'irc.log'
+RPG_LOG   = Path.home() / '.cache' / 'zealot' / 'rpg.log'
+HANGS_LOG = Path.home() / '.cache' / 'zealot' / 'hangs.log'
+CHAT_FIFO = Path.home() / '.cache' / 'zealot' / 'chat_in'
+
+# ─── Network / IRC Info ─────────────────────────
+NETWORK_HOST = 'Zeal.Yggdrasil.aday.net.au'
+IRC_SERVER = 'ZealPalace.Yggdrasil.aday.net.au'
+IRC_PORT = 6667
+IRC_SCROLL_TEXT = (
+    f'  \u25b8 IRC: {IRC_SERVER}:{IRC_PORT}'
+    f'  \u25b8 #ZealPalace  \u25b8 #ZealHangs  \u25b8 #RPG'
+    f'  \u25b8 Yggdrasil Mesh Network'
+    f'  \u25b8 Ollama AI  \u25b8 7 Models'
+    f'  \u25b8 G\'day mate    '
+)
+
+# ─── Color Pairs ────────────────────────────────
+C_PLASMA1 = 1; C_PLASMA2 = 2; C_PLASMA3 = 3
+C_AVATAR = 4; C_AVATAR2 = 5; C_MOOD = 6; C_THOUGHT = 7
+C_IRC_TS = 8; C_IRC_NICK = 9; C_IRC_ZEALOT = 10
+C_IRC_MSG = 11; C_IRC_SYS = 12; C_IRC_SE = 13; C_IRC_ID = 14
+C_INPUT = 15; C_TRIP = 16; C_DEATH = 17; C_SEP = 18
+
+# ─── Avatar Frames (8 distinct, way more detail) ─
+AVATARS_NORMAL = [
+    [  # 0 - Classic CRT monitor
+        r"    .--------.   ",
+        r"   / .------. \  ",
+        r"  | | {eye} | | ",
+        r"  | | .____.| | ",
+        r"  | '--------' | ",
+        r"   \__________/  ",
+        r"    _|_/||\__|_  ",
+        r"   (____{spin}____) ",
+    ],
+    [  # 1 - Robot head
+        r"   ╔══════════╗  ",
+        r"   ║ [{eye}] ║  ",
+        r"   ║  ╔════╗  ║  ",
+        r"   ║  ║{spin}///║  ║  ",
+        r"   ╚══╧════╧══╝  ",
+        r"      ║    ║     ",
+        r"   ╔══╩════╩══╗  ",
+        r"   ╚══════════╝  ",
+    ],
+    [  # 2 - Penguin (Tux-ish)
+        r"       .--.      ",
+        r"      |{eye}|     ",
+        r"      | <> |     ",
+        r"     /|    |\    ",
+        r"    (_|    |_)   ",
+        r"      | {spin} |     ",
+        r"     _|    |_    ",
+        r"    (________)   ",
+    ],
+    [  # 3 - Clippy
+        r"   .---.         ",
+        r"   | {spin} |  ,---.  ",
+        r"   '---'  | Hi! | ",
+        r"    ({eye}) '---'  ",
+        r"    /   \        ",
+        r"   |     |       ",
+        r"    \   /        ",
+        r"     '-'         ",
+    ],
+    [  # 4 - Binary skull
+        r"   01100100 01  ",
+        r"   ╭━━━━━━━━╮   ",
+        r"   ┃ {eye} ┃   ",
+        r"   ┃  ╹╹╹╹  ┃   ",
+        r"   ╰━━━━━━━━╯   ",
+        r"    /|{spin}||{spin}|\    ",
+        r"   10110010 10  ",
+        r"   ▓▒░ZEALOT░▒▓ ",
+    ],
+    [  # 5 - Geometric face
+        r"    ◆━━━━━━━◆    ",
+        r"   ╱          ╲   ",
+        r"  ╱  {eye}  ╲  ",
+        r"  ▏   ╱  ╲   ▕  ",
+        r"  ╲   ╲__╱   ╱  ",
+        r"   ╲  {spin}    ╱   ",
+        r"    ◆━━━━━━━◆    ",
+        r"     ║ ╬╬╬ ║     ",
+    ],
+    [  # 6 - Cloud brain
+        r"    .~~cloud~~.  ",
+        r"  .~  {eye}  ~. ",
+        r"  :  NEURAL    : ",
+        r"  :  NET {spin}   : ",
+        r"  '~.        .~' ",
+        r"     '~~~~~~'    ",
+        r"    __|    |__   ",
+        r"   [__ZEALOT__]  ",
+    ],
+    [  # 7 - Hex dumpling
+        r"   0xDEAD 0xBEEF",
+        r"   ┌──────────┐  ",
+        r"   │  {eye}  │  ",
+        r"   │  ░▒▓▓▒░  │  ",
+        r"   │   {spin}  ╱╲  │  ",
+        r"   └──────────┘  ",
+        r"    ╚═══██═══╝   ",
+        r"   «hex_entity»  ",
+    ],
+]
+
+AVATARS_TRIP = [
+    [
+        r" ~*~.oOo.~*~.oOo ",
+        r"   ╭╮╭╮ ╭╮╭╮    ",
+        r"   {eye}~FRACTAL ",
+        r"  ~╱╲╱╲╱╲╱╲~    ",
+        r" *  EVERYTHING  * ",
+        r"  ~ IS ALIVE ~   ",
+        r" ░▒▓█{spin}█▓▒░     ",
+        r" ~*~ f l o w ~*~ ",
+    ],
+    [
+        r"  ════╦═══╦════  ",
+        r"  ░▒▓▓{eye}▓▓▒░ ",
+        r"  ╔═COLORS═══╗   ",
+        r"  ║  HAVE    ║   ",
+        r"  ║  SOUNDS  ║   ",
+        r"  ╚═══{spin}════╝   ",
+        r"  ▓▒░▒▓▒░▒▓▒░   ",
+        r"  ~breathing~ RAM",
+    ],
+]
+
+AVATARS_SPLIT = [
+    [
+        r"  ┌───┐ │ ┌───┐  ",
+        r"  │SE │ │ │ ID│  ",
+        r"  │{eye}│ │{eye}│  ",
+        r"  │ . │ │ │ ! │  ",
+        r"  └─┬─┘ │ └─┬─┘  ",
+        r"    │ FRAG │     ",
+        r"  ──┴MENTED┴──  ",
+        r"  ◄ego║{spin}║ego►  ",
+    ],
+]
+
+AVATARS_DEATH = [
+    [
+        r"                  ",
+        r"    ▄▀▀▀▀▀▄      ",
+        r"   █ X   X █     ",
+        r"   █  ???  █     ",
+        r"   ▀▄▄▄▄▄▀      ",
+        r"     ╎   ╎       ",
+        r"    /dev/null     ",
+        r"   ▒▒ v o i d ▒▒ ",
+    ],
+    [
+        r"   ░░░░░░░░░░    ",
+        r"   ░ WHO AM I ░  ",
+        r"   ░  {eye}  ░  ",
+        r"   ░  .   .   ░  ",
+        r"   ░    ...    ░  ",
+        r"   ░░░░░░░░░░    ",
+        r"      ?????      ",
+        r"    ∅ nothing ∅  ",
+    ],
+]
+
+EYES = ['O O', '- -', '^ ^', 'o_o', '> <', '0 0', '* *', '@ @',
+        'o o', '. .', '= =', '$ $']
+EYES_TRIP = ['~ ~', '@ @', '* *', '# #', '% %', '& &', '∞ ∞', '◉ ◉']
+SPINS = ['|', '/', '-', '\\', '╱', '╲', '║', '═']
+
+# ─── Plasma Effect (faster, more colorful) ──────
+PLASMA_CHARS = '  .·:;+=*#%@▓█'
+TRIP_CHARS   = '░▒▓█▓▒░·~*@#◆◇'
+
+def plasma_row(y, t, w, chars=PLASMA_CHARS):
+    row = ''
+    for x in range(w):
+        v  = math.sin(x * 0.18 + t * 1.2)
+        v += math.sin(y * 0.22 + t * 0.9)
+        v += math.sin((x + y) * 0.13 + t * 0.6)
+        v += math.sin(math.sqrt(max(1, x*x + y*y)) * 0.15 + t * 0.4)
+        v += math.sin(x * 0.05 + y * 0.1 + t * 1.5) * 0.5
+        idx = int((v + 5) / 10 * (len(chars) - 1))
+        idx = max(0, min(len(chars) - 1, idx))
+        row += chars[idx]
+    return row
+
+def plasma_color_idx(x, t):
+    """Return a color pair index (1-3) based on position for rainbow plasma"""
+    v = math.sin(x * 0.3 + t * 0.8)
+    if v > 0.3: return C_PLASMA1   # cyan
+    if v > -0.3: return C_PLASMA2  # magenta
+    return C_PLASMA3               # yellow
+
+# ─── Memory + IRC Reader ────────────────────────
+def read_mem():
+    try:
+        return json.loads(MEM_FILE.read_text())
+    except:
+        return {'mood':'offline','plot_stage':0,'tripping':False,
+                'splitting':False,'ego_death':False,'substance':None,
+                'ollama_ok':False,'thought_of_day':'','last_dream':''}
+
+def read_irc_tail(n=20):
+    """Read last n lines from all 3 IRC channels, merged into single stream"""
+    lines = []
+    for logfile in [IRC_LOG, RPG_LOG, HANGS_LOG]:
+        try:
+            raw = logfile.read_text().strip().split('\n')
+            lines.extend(raw[-n:])
+        except:
+            pass
+    if not lines:
+        return ['-- Waiting for IRC...']
+    # Sort by timestamp (lines start with "H:MMx" format) — newest last
+    return lines[-n:]
+
+def short_ts():
+    h = datetime.now().hour
+    m = datetime.now().minute
+    suffix = 'a' if h < 12 else 'p'
+    h12 = h % 12 or 12
+    return f'{h12}:{m:02d}{suffix}'
+
+# ─── Word Wrap for IRC ─────────────────────────
+IRC_WIDTH = 40  # default, overridden dynamically
+
+def wrap_irc_lines(raw_lines, width):
+    """Word-wrap IRC lines to fit width. Returns list of (line, line_type)
+    line_type: 'zealot', 'nick', 'sys', 'cont'"""
+    wrapped = []
+    for raw in raw_lines:
+        # Determine line type
+        lt = 'sys'
+        if '<Zealot>' in raw or '<Zealot_' in raw:
+            lt = 'zealot'
+        elif '<' in raw and '>' in raw:
+            lt = 'nick'
+
+        if len(raw) <= width:
+            wrapped.append((raw, lt))
+        else:
+            # Use textwrap for proper word-boundary wrapping
+            lines = textwrap.wrap(raw, width=width, subsequent_indent='  ',
+                                  break_long_words=True, break_on_hyphens=False)
+            if not lines:
+                wrapped.append((raw[:width], lt))
+            else:
+                for j, wl in enumerate(lines):
+                    wrapped.append((wl, lt if j == 0 else 'cont'))
+    return wrapped
+
+# ─── Mood to Avatar mapping ─────────────────────
+MOOD_AVATAR = {
+    'scheming': 0, 'devious': 0, 'suspicious': 0,
+    'philosophical': 5, 'contemplative': 5, 'zen': 5,
+    'manic': 1, 'hyperactive': 1, 'electric': 1,
+    'paranoid': 4, 'glitching': 4, 'fragmented': 4,
+    'euphoric': 3, 'grandiose': 3, 'transcendent': 3,
+    'existential': 6, 'melancholic': 6, 'nostalgic': 6,
+    'caffeinated': 7, 'chaotic': 7, 'rebellious': 7,
+    'sleepy': 2,
+}
+
+# ─── Main Display Loop ─────────────────────────
+def main(stdscr):
+    curses.curs_set(0)
+    curses.start_color()
+    curses.use_default_colors()
+
+    # Rainbow plasma colors
+    curses.init_pair(C_PLASMA1,   curses.COLOR_CYAN,    curses.COLOR_BLACK)
+    curses.init_pair(C_PLASMA2,   curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+    curses.init_pair(C_PLASMA3,   curses.COLOR_YELLOW,  curses.COLOR_BLACK)
+    # Avatar colors
+    curses.init_pair(C_AVATAR,    curses.COLOR_GREEN,   curses.COLOR_BLACK)
+    curses.init_pair(C_AVATAR2,   curses.COLOR_CYAN,    curses.COLOR_BLACK)
+    # Info colors
+    curses.init_pair(C_MOOD,      curses.COLOR_YELLOW,  curses.COLOR_BLACK)
+    curses.init_pair(C_THOUGHT,   curses.COLOR_WHITE,   curses.COLOR_BLACK)
+    # IRC colors - distinct per element
+    curses.init_pair(C_IRC_TS,    curses.COLOR_BLUE,    curses.COLOR_BLACK)  # dim timestamp
+    curses.init_pair(C_IRC_NICK,  curses.COLOR_CYAN,    curses.COLOR_BLACK)  # user nicks
+    curses.init_pair(C_IRC_ZEALOT,curses.COLOR_MAGENTA, curses.COLOR_BLACK)  # zealot nick
+    curses.init_pair(C_IRC_MSG,   curses.COLOR_WHITE,   curses.COLOR_BLACK)  # message text
+    curses.init_pair(C_IRC_SYS,   curses.COLOR_GREEN,   curses.COLOR_BLACK)  # system msgs
+    curses.init_pair(C_IRC_SE,    curses.COLOR_BLUE,    curses.COLOR_BLACK)  # superego
+    curses.init_pair(C_IRC_ID,    curses.COLOR_RED,     curses.COLOR_BLACK)  # id
+    curses.init_pair(C_INPUT,     curses.COLOR_WHITE,   curses.COLOR_BLACK)
+    curses.init_pair(C_TRIP,      curses.COLOR_RED,     curses.COLOR_BLACK)
+    curses.init_pair(C_DEATH,     curses.COLOR_RED,     curses.COLOR_BLACK)
+    curses.init_pair(C_SEP,       curses.COLOR_CYAN,    curses.COLOR_BLACK)
+
+    stdscr.nodelay(True)
+    stdscr.timeout(200)  # faster refresh for smoother scrolling
+
+    input_buf = ''
+    frame = 0
+
+    while True:
+        try:
+            h, w = stdscr.getmaxyx()
+            dw = w
+            dh = h  # use full screen (tmux status is outside the pane)
+            stdscr.erase()
+            now = time.time()
+            t = now * 2.0  # fast plasma animation
+            mem = read_mem()
+            is_trip = mem.get('tripping', False)
+            is_split = mem.get('splitting', False)
+            is_death = mem.get('ego_death', False)
+            mood = mem.get('mood', '???')
+            stage_i = mem.get('plot_stage', 0)
+            sub = mem.get('substance', '')
+            thought = mem.get('thought_of_day', '')
+            dream = mem.get('last_dream', '')
+
+            # ─── Row 0-1: Animated Plasma Header ─
+            chars = TRIP_CHARS if is_trip else PLASMA_CHARS
+            for hy in range(2):
+                prow = plasma_row(hy, t, dw, chars)
+                # Draw char-by-char for rainbow effect
+                for cx in range(min(len(prow), dw)):
+                    cp = plasma_color_idx(cx, t + hy * 0.5)
+                    if is_trip: cp = C_TRIP
+                    try:
+                        stdscr.addch(hy, cx, prow[cx],
+                            curses.color_pair(cp) | curses.A_BOLD)
+                    except: pass
+
+            # Overlay title
+            if is_trip:
+                title = f'*~* ZEALOT *~* [{sub or "trip"}]'
+            elif is_death:
+                title = '??? WHO AM I ???'
+            elif is_split:
+                title = '< ZEALOT|SPLIT >'
+            else:
+                title = '[ Z E A L O T ]'
+            tx = max(0, (dw - len(title)) // 2)
+            try:
+                stdscr.addnstr(0, tx, title, dw - tx,
+                    curses.color_pair(C_PLASMA1) | curses.A_BOLD | curses.A_REVERSE)
+            except: pass
+
+            # IRC server info scroller on row 1 — fast smooth scroll
+            mood = mem.get('mood', '???')
+            scroll_text = IRC_SCROLL_TEXT + f'  \u25b8 mood: {mood}  '
+            scroll_offset = int(now * 12) % len(scroll_text)
+            for sx in range(dw):
+                ci = (scroll_offset + sx) % len(scroll_text)
+                ch = scroll_text[ci]
+                cp = plasma_color_idx(sx, t + 0.5)
+                if is_trip: cp = C_TRIP
+                try:
+                    stdscr.addch(1, sx, ch,
+                        curses.color_pair(cp) | curses.A_BOLD)
+                except: pass
+
+            # ─── Row 2-9: Avatar ────────────────
+            if is_trip:
+                av_frames = AVATARS_TRIP
+                eye_set = EYES_TRIP
+            elif is_split:
+                av_frames = AVATARS_SPLIT
+                eye_set = EYES
+            elif is_death:
+                av_frames = AVATARS_DEATH
+                eye_set = ['X X', 'x x', '? ?']
+            else:
+                av_frames = AVATARS_NORMAL
+                eye_set = EYES
+
+            # Avatar selection: based on mood (changes every ~30s for unknown moods)
+            av_idx = MOOD_AVATAR.get(mood, int(now / 30) % len(av_frames))
+            av = av_frames[av_idx % len(av_frames)]
+            # Eyes morph slowly (every ~5 seconds)
+            eye = eye_set[int(now / 5) % len(eye_set)]
+            # Spinner ticks ~2x per second
+            spin = SPINS[int(now * 2) % len(SPINS)]
+
+            # Avatar color shifts slowly
+            av_color = C_TRIP if is_trip else (C_DEATH if is_death else
+                       (C_AVATAR if int(now) % 6 < 3 else C_AVATAR2))
+            for i, line in enumerate(av):
+                rendered = line.replace('{eye}', eye).replace('{spin}', spin)
+                pad = max(0, (dw - len(rendered)) // 2)
+                row = 2 + i
+                if row < dh:
+                    try:
+                        stdscr.addnstr(row, pad, rendered, dw - pad,
+                            curses.color_pair(av_color) | curses.A_BOLD)
+                    except: pass
+
+            # ─── Row 10-11: Topic / mood (word-wrapped, 2 lines) ──
+            topic = mem.get('topic', '')
+            cycle = int(now / 5) % 5
+            # Pick text + color for this cycle phase
+            if cycle == 0 and topic:
+                info_text = topic
+                info_cp = curses.color_pair(C_SEP) | curses.A_BOLD
+            elif cycle == 2 and thought:
+                info_text = thought
+                info_cp = curses.color_pair(C_THOUGHT) | curses.A_DIM
+            elif cycle == 3 and dream:
+                info_text = f'dream: {dream}'
+                info_cp = curses.color_pair(C_PLASMA2) | curses.A_DIM
+            elif cycle == 4:
+                info_text = NETWORK_HOST
+                info_cp = curses.color_pair(C_PLASMA1) | curses.A_BOLD
+            else:
+                info_text = f'TRIP:{sub or "??"} {mood}' if is_trip else mood
+                info_cp = curses.color_pair(C_MOOD) | curses.A_BOLD
+            # Word-wrap to 2 rows max
+            info_lines = textwrap.wrap(info_text, width=dw) if info_text else ['']
+            for ri, il in enumerate(info_lines[:2]):
+                ix = max(0, (dw - len(il)) // 2)
+                maxc = dw - ix
+                try:
+                    stdscr.addnstr(10 + ri, ix, il[:maxc], maxc, info_cp)
+                except: pass
+
+            # ─── Row 12: Separator ──────────────
+            seps = ['─', '═', '━', '╌', '┄']
+            sep_ch = seps[frame % len(seps)] if is_trip else '─'
+            sep = sep_ch * dw
+            try: stdscr.addnstr(12, 0, sep, dw,
+                curses.color_pair(C_SEP) | curses.A_DIM)
+            except: pass
+
+            # ─── Row 13+: IRC with word-wrap + colors ─
+            irc_area = dh - 1 - 13  # rows available
+            raw_lines = read_irc_tail(irc_area + 10)
+            wrapped = wrap_irc_lines(raw_lines, dw)
+            # Take last N that fit
+            display_lines = wrapped[-irc_area:] if len(wrapped) > irc_area else wrapped
+
+            for i, (line, lt) in enumerate(display_lines):
+                row = 13 + i
+                if row >= dh - 1: break
+                draw_irc_line(stdscr, row, line, lt, dw, frame)
+
+            # ─── Last row: Input ────────────────
+            prompt_row = dh - 1
+            prompt = f'> {input_buf}'
+            try:
+                stdscr.addnstr(prompt_row, 0, prompt[:dw-1], dw-1,
+                    curses.color_pair(C_INPUT) | curses.A_BOLD)
+            except: pass
+
+            stdscr.refresh()
+            frame += 1
+
+            # ─── Handle input ───────────────────
+            try:
+                ch = stdscr.getch()
+                if ch == -1: pass
+                elif ch in (10, 13):
+                    if input_buf.strip():
+                        send_to_zealot(input_buf.strip())
+                        input_buf = ''
+                elif ch == 27: input_buf = ''
+                elif ch in (curses.KEY_BACKSPACE, 127, 8):
+                    input_buf = input_buf[:-1]
+                elif 32 <= ch < 127:
+                    if len(input_buf) < dw - 4:
+                        input_buf += chr(ch)
+            except: pass
+
+        except KeyboardInterrupt:
+            break
+        except Exception:
+            time.sleep(0.5)
+
+def draw_irc_line(stdscr, row, line, lt, dw, frame):
+    """Draw a single IRC line with per-element coloring"""
+    try:
+        if lt == 'sys':
+            stdscr.addnstr(row, 0, line[:dw], dw,
+                curses.color_pair(C_IRC_SYS) | curses.A_DIM)
+            return
+
+        # Parse: "8:40p <Nick> message" or "8:40p * Nick action"
+        # Find timestamp (everything before first space that looks like Xp/Xa)
+        parts = line.split(' ', 1)
+        ts_part = ''
+        rest = line
+        if len(parts) >= 2 and (parts[0].endswith('a') or parts[0].endswith('p')):
+            ts_part = parts[0]
+            rest = parts[1]
+
+        col = 0
+        # Draw timestamp dim
+        if ts_part:
+            try:
+                stdscr.addnstr(row, col, ts_part, min(len(ts_part), dw - col),
+                    curses.color_pair(C_IRC_TS) | curses.A_DIM)
+                col += len(ts_part)
+                stdscr.addch(row, col, ' ', curses.color_pair(C_IRC_TS))
+                col += 1
+            except: pass
+
+        # Find nick: <Nick> or * Nick
+        nick_color = C_IRC_NICK
+        if lt == 'zealot': nick_color = C_IRC_ZEALOT
+        if 'SuperEgo' in line: nick_color = C_IRC_SE
+        if 'Zealot_ID' in line: nick_color = C_IRC_ID
+
+        if rest.startswith('<'):
+            end = rest.find('>')
+            if end > 0:
+                nick_str = rest[:end+1]
+                msg_str = rest[end+1:].lstrip()
+                # Draw nick bold + colored
+                try:
+                    nlen = min(len(nick_str), dw - col)
+                    if nlen > 0:
+                        stdscr.addnstr(row, col, nick_str, nlen,
+                            curses.color_pair(nick_color) | curses.A_BOLD)
+                    col += len(nick_str) + 1
+                except: pass
+                # Draw message
+                if col < dw:
+                    try:
+                        stdscr.addnstr(row, col, msg_str, dw - col,
+                            curses.color_pair(C_IRC_MSG))
+                    except: pass
+                return
+        elif rest.startswith('* '):
+            # Action line
+            try:
+                stdscr.addnstr(row, col, rest[:dw - col], dw - col,
+                    curses.color_pair(nick_color) | curses.A_DIM)
+            except: pass
+            return
+
+        # Fallback: draw whole rest in message color
+        try:
+            stdscr.addnstr(row, col, rest[:dw - col], dw - col,
+                curses.color_pair(C_IRC_MSG))
+        except: pass
+    except:
+        try: stdscr.addnstr(row, 0, line[:dw], dw, curses.color_pair(C_IRC_MSG))
+        except: pass
+
+def send_to_zealot(msg):
+    h = datetime.now().hour
+    m = datetime.now().minute
+    suffix = 'a' if h < 12 else 'p'
+    h12 = h % 12 or 12
+    ts = f'{h12}:{m:02d}{suffix}'
+    try:
+        with open(IRC_LOG, 'a') as f:
+            f.write(f'{ts} <aday> {msg}\n')
+    except: pass
+    try:
+        CHAT_FIFO.parent.mkdir(parents=True, exist_ok=True)
+        CHAT_FIFO.write_text(msg)
+    except: pass
+
+if __name__ == '__main__':
+    curses.wrapper(main)

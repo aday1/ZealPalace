@@ -1,0 +1,14 @@
+[Unit]
+Description=Zealot Blog Generator (daily)
+Wants=zealot-blog.timer
+
+[Service]
+Type=oneshot
+User=aday
+Group=aday
+ExecStart=/usr/bin/python3 /home/aday/.local/bin/zealot_blog.py
+Environment=TERM=linux
+WorkingDirectory=/home/aday
+
+[Install]
+WantedBy=multi-user.target

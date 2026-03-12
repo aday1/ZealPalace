@@ -1,0 +1,17 @@
+[Unit]
+Description=Zealot RPG Bot - #RPG text adventure dungeon master
+After=network.target ngircd.service
+Wants=ngircd.service
+
+[Service]
+Type=simple
+User=aday
+Group=aday
+ExecStart=/usr/bin/python3 /home/aday/.local/bin/zealot_rpg.py
+Restart=on-failure
+RestartSec=10
+Environment=TERM=linux
+WorkingDirectory=/home/aday
+
+[Install]
+WantedBy=multi-user.target

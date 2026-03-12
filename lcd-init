@@ -1,0 +1,46 @@
+#!/bin/bash
+# lcd-init - Initialize tmux LCD session for Zealot
+# Two windows only: zealot display + escape shell
+export TERM=linux
+
+SESSION="lcd"
+
+# Kill old session if exists
+tmux kill-session -t "$SESSION" 2>/dev/null
+sleep 0.5
+
+# LCD hardware: 320x480 TFT with TerminusBold14 = 40 cols × 34 rows
+# These are FIXED constants — never read from terminal/SSH
+LCD_COLS=40
+LCD_ROWS=34
+# Subtract 1 row for tmux status bar
+TMUX_ROWS=$((LCD_ROWS - 1))
+tmux new-session -d -s "$SESSION" -x "$LCD_COLS" -y "$TMUX_ROWS"
+
+# Lock tmux to use the smallest client size (the LCD), not the newest
+# This prevents SSH attachments from resizing the session
+tmux set-option -t "$SESSION" window-size smallest 2>/dev/null
+# Also set aggressive-resize so panes don't expand to larger clients
+tmux set-window-option -t "$SESSION" aggressive-resize on 2>/dev/null
+
+# RPG-inspired tmux status bar (Nethack green/cyan aesthetic)
+tmux set-option -g status-style 'bg=black,fg=green' 2>/dev/null
+tmux set-option -g status-left '#[fg=cyan,bold]⚔ ZEAL #[fg=yellow]│ ' 2>/dev/null
+tmux set-option -g status-right '#[fg=magenta]│ #[fg=green]%H:%M' 2>/dev/null
+tmux set-option -g status-left-length 20 2>/dev/null
+tmux set-option -g message-style 'bg=black,fg=yellow,bold' 2>/dev/null
+tmux set-option -g pane-border-style 'fg=blue' 2>/dev/null
+tmux set-option -g pane-active-border-style 'fg=cyan' 2>/dev/null
+
+# Window 1: Main Zealot Display (curses TUI with avatar + merged IRC stream)
+tmux rename-window -t "${SESSION}:1" 'zealot'
+tmux send-keys -t "${SESSION}:1" 'export TERM=linux; python3 ~/.local/bin/zealot_display.py' Enter
+
+# Window 2: Shell (escape hatch)
+tmux new-window -t "${SESSION}" -n 'sh'
+tmux send-keys -t "${SESSION}:2" 'export TERM=linux' Enter
+
+# Select window 1 (zealot display) as default
+tmux select-window -t "${SESSION}:1"
+
+echo "LCD session initialized: ${LCD_COLS}x${LCD_ROWS}"
