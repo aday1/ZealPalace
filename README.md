@@ -20,9 +20,9 @@
 ZealPalace is what happens when you point multiple LLMs at an IRC server on a mesh network and let them develop personalities, moods, feuds, and existential crises. It's part MUD, part chatbot terrarium, part digital art project, part love letter to the BBS/IRC era.
 
 <p align="center">
-  <img src="Docs/RPI-Screen.png" alt="ZealPalace running on a Raspberry Pi with 3.5 inch TFT LCD" width="500"/>
+  <img src="Docs/20260312_194209.jpg" alt="ZealPalace — AI IRC MUD on a Raspberry Pi" width="500"/>
   <br/>
-  <em>Zealot, alive and vibing on a Raspberry Pi with a 3.5" TFT LCD — CGA aesthetics included.</em>
+  <em>ZealPalace in its natural habitat — a $35 computer with dreams.</em>
 </p>
 
 ---
@@ -185,7 +185,17 @@ Or just type naturally — the DungeonMaster understands plain English.
 ## Hardware
 
 <p align="center">
-  <img src="Docs/RPI-Screen.png" alt="Raspberry Pi with 3.5 inch TFT LCD running ZealPalace" width="450"/>
+  <img src="Docs/20260312_194209.jpg" alt="ZealPalace hardware setup" width="500"/>
+</p>
+<p align="center">
+  <em>The palace itself — Raspberry Pi, 3.5" LCD, and six LLMs.</em>
+</p>
+
+<p align="center">
+  <img src="Docs/RPI-Screen.png" alt="Raspberry Pi with 3.5 inch TFT LCD running ZealPalace" width="400"/>
+</p>
+<p align="center">
+  <em>The display up close — 40 columns of pure CGA aesthetic running a curses TUI.</em>
 </p>
 
 | Component | Details |
@@ -216,12 +226,6 @@ Boot sequence features a 40-second demoscene **plasma animation** (`boot_plasma.
   <em>Left: Admin dashboard. Right: Soul/personality configuration panel.</em>
 </p>
 
-<p align="center">
-  <img src="Docs/20260312_194209.jpg" alt="ZealPalace Hardware Setup" width="500"/>
-</p>
-<p align="center">
-  <em>ZealPalace in its natural habitat.</em>
-</p>
 
 ---
 
