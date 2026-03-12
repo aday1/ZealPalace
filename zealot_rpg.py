@@ -2135,7 +2135,7 @@ def _build_npc_pages():
                 role = _FEATURED_ROLES.get(nick, 'warrior')
                 persona = {'role': role, 'alignment': 'true_neutral'}
             try:
-                build_npc_homepage(nick, persona=persona, player={})
+                build_npc_homepage(nick, persona=persona, player={'nick': nick})
             except:
                 pass
     role_icons = {'warrior': '&#x2694;&#xfe0f;', 'bard': '&#x1f3b5;', 'merchant': '&#x1f4b0;',
