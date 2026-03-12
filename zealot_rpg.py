@@ -2114,10 +2114,26 @@ def _build_npc_pages():
                 build_npc_homepage(nick, persona=persona, player=p)
         except:
             pass
-    # Second pass: build homepages for NPC_PERSONAS entries without player files
-    # (e.g. ZealHangs bots: Pixel, CHMOD, n0va, glitchgrl, Lyric, Riff, etc.)
-    for nick, persona in NPC_PERSONAS.items():
-        if nick not in built_nicks:
+    # Second pass: build homepages for any NPC directories without index.html
+    # Covers ZealHangs bots (Pixel, CHMOD, n0va, etc.) and canonical RPG NPCs
+    # referenced by the landing page (Lyric, Riff, Vendor, Cleric, Sybil, Vex, Index)
+    _FEATURED_ROLES = {
+        'Pixel': 'warrior', 'CHMOD': 'warrior', 'n0va': 'oracle',
+        'glitchgrl': 'alchemist', 'BotMcBotface': 'artificer', 'Sage': 'oracle',
+        'xX_DarkByte_Xx': 'rogue',
+        'Lyric': 'bard', 'Riff': 'bard', 'Vendor': 'merchant',
+        'Cleric': 'priest', 'Sybil': 'priestess', 'Vex': 'necromancer',
+        'Index': 'librarian',
+    }
+    for npc_dir in sorted(NPC_BLOG_DIR.iterdir()):
+        if npc_dir.is_dir() and not (npc_dir / 'index.html').exists():
+            nick = npc_dir.name
+            if nick in built_nicks:
+                continue
+            persona = NPC_PERSONAS.get(nick)
+            if not persona:
+                role = _FEATURED_ROLES.get(nick, 'warrior')
+                persona = {'role': role, 'alignment': 'true_neutral'}
             try:
                 build_npc_homepage(nick, persona=persona, player={})
             except:
