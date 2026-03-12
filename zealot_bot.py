@@ -19,7 +19,7 @@ IRC_HOST = '127.0.0.1'
 IRC_PORT = 6667
 CHANNEL  = '#ZealPalace'
 OPER_NAME = 'zealot'
-OPER_PASS = 'z3al0t_0p3r'
+OPER_PASS = os.environ.get('ZEALOT_OPER_PASS', 'changeme')
 OLLAMA    = os.environ.get('OLLAMA_HOST', 'http://10.13.37.5:11434')
 MODELS    = {
     'ego':      os.environ.get('ZEALOT_EGO',      'llama3.2'),
