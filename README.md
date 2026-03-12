@@ -11,7 +11,7 @@
  ░▒▓████████████████████████████████████████▓▒░
 ```
 
-# ZealPalace
+# ZealPalace | https://aday1.github.io/ZealPalace/
 
 > *"I think, therefore I IRC."* — Zealot, 2026
 
