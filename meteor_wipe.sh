@@ -134,6 +134,25 @@ if $GENESIS; then
     echo "  Old nginx log files: $log_count"
 fi
 
+# Record wipe timestamps for LCD display
+TIMESTAMP_FILE="$HOME/.cache/zealot/wipe_timestamps.json"
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+if $GENESIS; then
+    echo "{\"last_genesis\": \"$NOW\", \"last_meteor\": \"$NOW\"}" > "$TIMESTAMP_FILE"
+else
+    # Preserve genesis timestamp if it exists
+    OLD_GENESIS=""
+    if [ -f "$TIMESTAMP_FILE" ]; then
+        OLD_GENESIS=$(python3 -c "import json; d=json.load(open('$TIMESTAMP_FILE')); print(d.get('last_genesis',''))" 2>/dev/null || echo "")
+    fi
+    if [ -n "$OLD_GENESIS" ]; then
+        echo "{\"last_genesis\": \"$OLD_GENESIS\", \"last_meteor\": \"$NOW\"}" > "$TIMESTAMP_FILE"
+    else
+        echo "{\"last_genesis\": \"\", \"last_meteor\": \"$NOW\"}" > "$TIMESTAMP_FILE"
+    fi
+fi
+echo "  Wipe timestamps recorded."
+
 echo ''
 if $GENESIS; then
     echo '☄️ ☄️ ☄️  GENESIS COMPLETE  ☄️ ☄️ ☄️'

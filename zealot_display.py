@@ -42,6 +42,7 @@ NPC_STATE  = Path.home() / '.cache' / 'zealot' / 'npc' / 'npc_state.json'
 BATTLE_STATE = Path.home() / '.cache' / 'zealot' / 'npc' / 'active_battle.json'
 SOUL_FILE  = Path.home() / '.cache' / 'zealot' / 'soul.json'
 CHAT_FIFO  = Path.home() / '.cache' / 'zealot' / 'chat_in'
+WIPE_TS    = Path.home() / '.cache' / 'zealot' / 'wipe_timestamps.json'
 
 # ─── Network / IRC Info ─────────────────────────
 NETWORK_HOST = 'Zeal.Yggdrasil.aday.net.au'
@@ -1561,10 +1562,33 @@ def main(stdscr):
             except:
                 pass
 
+            # Read uptime + wipe timestamps for ticker
+            try:
+                with open('/proc/uptime') as _uf:
+                    _upsec = int(float(_uf.read().split()[0]))
+                _upd, _uph = _upsec // 86400, (_upsec % 86400) // 3600
+                _upm = (_upsec % 3600) // 60
+                uptime_str = f'{_upd}d{_uph}h{_upm}m'
+            except:
+                uptime_str = '?'
+            wipe_bits = ''
+            try:
+                _wts = json.loads(WIPE_TS.read_text())
+                _lm = _wts.get('last_meteor', '')
+                _lg = _wts.get('last_genesis', '')
+                if _lm:
+                    wipe_bits += f'  \u25b8 meteor: {_lm[:10]}'
+                if _lg:
+                    wipe_bits += f'  \u25b8 genesis: {_lg[:10]}'
+            except:
+                pass
+
             scroll_text = (
                 IRC_SCROLL_TEXT
+                + f'  \u25b8 up: {uptime_str}'
                 + f'  \u25b8 mood: {mood}'
                 + f'  \u25b8 theme: {theme_name}'
+                + wipe_bits
                 + npc_bits
                 + world_bits + '    '
             )

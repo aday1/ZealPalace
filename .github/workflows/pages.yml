@@ -29,6 +29,7 @@ jobs:
           mkdir -p _site
           cp site/index.html _site/
           cp site/style.css _site/
+          cp site/404.html _site/ 2>/dev/null || true
           mkdir -p _site/images
           cp Docs/*.png _site/images/ 2>/dev/null || true
           cp Docs/*.jpg _site/images/ 2>/dev/null || true
