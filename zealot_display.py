@@ -14,6 +14,8 @@ Color themes cycle throughout the day (4-hour blocks).
 """
 import curses, time, math, os, sys, json, random, textwrap, socket
 from pathlib import Path
+sys.path.insert(0, str(Path.home() / ".local/bin"))
+from zealot_sip_flash import SipCallFlash, poll_sip_call_flash
 from datetime import datetime
 
 os.environ['TERM'] = 'linux'
@@ -1387,10 +1389,45 @@ def _is_action_line(raw):
         s = parts[1]
     return s.startswith('* ')
 
+def _parse_irc_line(raw):
+    """Split merged IRC log line into prefix, nick header, message body."""
+    tag = ''
+    body = raw
+    if body.startswith('[') and '] ' in body[:10]:
+        i = body.find('] ')
+        tag = body[: i + 2]
+        body = body[i + 2 :]
+    ts = ''
+    if body and ' ' in body:
+        first, rest = body.split(' ', 1)
+        if len(first) <= 7 and ':' in first and first[-1] in 'ap':
+            ts = first + ' '
+            body = rest
+    prefix = tag + ts
+    header = ''
+    msg = body
+    if body.startswith('<'):
+        end = body.find('>')
+        if end > 0:
+            header = body[: end + 1] + ' '
+            msg = body[end + 1 :].lstrip()
+    elif body.startswith('* '):
+        parts = body[2:].split(' ', 1)
+        nick = parts[0] if parts else ''
+        header = '* ' + nick + (' ' if nick else '')
+        msg = parts[1] if len(parts) > 1 else ''
+    return prefix, header, msg
+
+
 def wrap_irc_lines(raw_lines, width):
-    """Word-wrap IRC lines to fit width."""
+    """Word-wrap IRC for 40-col LCD; continuations use 2-space indent (lt=cont)."""
     wrapped = []
+    w = max(20, width)
+    cont_pad = '  '
     for raw in raw_lines:
+        if raw.strip().startswith('--'):
+            wrapped.append((raw[:w], 'sys'))
+            continue
         lt = 'sys'
         if '<Zealot>' in raw or '<Zealot_' in raw:
             lt = 'zealot'
@@ -1399,17 +1436,36 @@ def wrap_irc_lines(raw_lines, width):
         elif _is_action_line(raw):
             lt = 'action'
 
-        if len(raw) <= width:
-            wrapped.append((raw, lt))
-        else:
-            lines = textwrap.wrap(raw, width=width, subsequent_indent=' ',
-                                  break_long_words=True, break_on_hyphens=False)
-            if not lines:
-                wrapped.append((raw[:width], lt))
-            else:
-                for j, wl in enumerate(lines):
-                    wrapped.append((wl, lt))
+        prefix, header, msg = _parse_irc_line(raw)
+        head = prefix + header
+        if not msg:
+            wrapped.append(((head or raw)[:w], lt))
+            continue
+        if len(head) + len(msg) <= w:
+            wrapped.append((head + msg, lt))
+            continue
+        first_room = max(8, w - len(head))
+        parts = textwrap.wrap(
+            msg,
+            width=first_room,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+        if not parts:
+            parts = [msg[: max(1, first_room)]]
+        wrapped.append((head + parts[0], lt))
+        if len(parts) > 1:
+            rest = ' '.join(parts[1:])
+            cont_w = max(12, w - len(cont_pad))
+            for line in textwrap.wrap(
+                rest,
+                width=cont_w,
+                break_long_words=True,
+                break_on_hyphens=False,
+            ):
+                wrapped.append((cont_pad + line, 'cont'))
     return wrapped
+
 
 # ─── Main Display Loop ─────────────────────────
 def main(stdscr):
@@ -1437,6 +1493,7 @@ def main(stdscr):
     mood_flash = MoodFlash()
     existential_flash = ExistentialFlash()
     battle_flash = BattleFlash()
+    sip_flash = SipCallFlash(figlet_lines)
     scene_cycler = SceneCycler()
     last_mood = ''
     dcfg = read_display_config()
@@ -1462,6 +1519,7 @@ def main(stdscr):
                 _rebuild_npc_irc_colors(npc_cache)
                 # Check for battle round changes → trigger battle flash
                 battle_flash.check_battle(battle_cache)
+                poll_sip_call_flash(sip_flash)
                 # Check for existential crisis in any NPC
                 for npc_name, npc_data in npc_cache.items():
                     if npc_name.startswith('_'):
@@ -1846,7 +1904,9 @@ def main(stdscr):
                                 pass
 
             # ─── Battle Flash Overlay (pyfiglet action words) ───
-            if battle_flash.active():
+            if sip_flash.active():
+                sip_flash.draw(stdscr, 2, dw, C_INFO, C_MOOD)
+            elif battle_flash.active():
                 battle_flash.draw(stdscr, 3, dw)
             # ─── Existential Crisis Flash (takes priority over mood flash) ───
             elif existential_flash.active():
@@ -1915,7 +1975,7 @@ def main(stdscr):
             irc_start = 12
             irc_area = dh - 1 - irc_start
             if irc_area > 0:
-                raw_lines = read_irc_tail(irc_area + 15)
+                raw_lines = read_irc_tail(max(irc_area * 3, 48))
                 # Apply display toggles
                 if not dcfg.get('show_channels', True):
                     raw_lines = [l.split('] ', 1)[-1] if l.startswith('[') else l for l in raw_lines]
@@ -1986,6 +2046,13 @@ def draw_irc_line(stdscr, row, line, lt, dw):
         if lt == 'sys':
             stdscr.addnstr(row, 0, line[:dw], dw,
                 curses.color_pair(C_IRC_SYS) | curses.A_DIM)
+            return
+
+        if line.startswith("  ") and lt != "sys":
+            try:
+                stdscr.addnstr(row, 0, line[:dw], dw, curses.color_pair(C_IRC_MSG))
+            except Exception:
+                pass
             return
 
         col = 0

@@ -54,6 +54,7 @@ echo "  Done."
 echo "[5/10] Deploying scripts..."
 for script in zealot_bot.py zealot_display.py boot_plasma.py zealot_blog.py \
              zealot_rpg.py zealot_hangs.py zealot_web_api.py zealot_admin.py \
+             zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py \
              lcd-init lcd-boot; do
     if [ -f "$DEPLOY_DIR/$script" ]; then
         cp "$DEPLOY_DIR/$script" "$BIN_DIR/$script"
@@ -172,4 +173,9 @@ ls -la "$BIN_DIR"/zealot_* "$BIN_DIR"/boot_plasma.py "$BIN_DIR"/lcd-init "$BIN_D
 
 echo ""
 echo "=== DEPLOYMENT COMPLETE ==="
+if [ -d "$DEPLOY_DIR/patches" ]; then
+  echo "[post] Applying LCD / SIP patches..."
+  cp -r "$DEPLOY_DIR/patches" /tmp/zealpalace-patches
+  bash "$DEPLOY_DIR/patches/apply-on-zeal.sh" /tmp/zealpalace-patches || true
+fi
 echo "Reboot recommended: sudo reboot"
