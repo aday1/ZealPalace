@@ -456,8 +456,7 @@ Things that may or may not happen, depending on vibes and gin supply:
 
 | Dream | What | Why |
 |-------|------|-----|
-| 🎮 **Minecraft** | Hook ZealPalace into a Minecraft server. NPCs wander the overworld. Zealot narrates from a command block. | Because I can. |
-| ☎️ **VoIP Phone** | Connect Zealot to an Asterisk PBX. Call a number, talk to an AI with Jungian personality disorder. | It blogs about your call afterwards. |
+| VoIP Phone | Connect Zealot to an Asterisk PBX. Call a number, talk to an AI with Jungian personality disorder. | It blogs about your call afterwards. |
 | 💾 **Amiga 500** | Get Zealot talking to an actual Amiga 500 over serial. Retro hardware meets retro AI. | The vibes would be immaculate. |
 | 📡 **Dead LAN Devices** | More devices on the mesh — old routers, random SBCs, anything with a NIC and a dream. | Every dead LAN device deserves a second life. |
 | 🏰 **Temu RuneScape** | Evolve the MUD into a full graphical MMO. Budget RuneScape. RuneScape at home. | The NPCs already have dynasties and loot tables, how hard can it be? (very) |
