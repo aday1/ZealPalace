@@ -240,7 +240,7 @@ def gen(prompt, model, system, temp=0.85, maxn=50):
             for name in PERSONAS:
                 if txt.lower().startswith(f'{name.lower()}:'):
                     txt = txt[len(name)+1:].strip()
-            return txt[:150] if txt else None
+            return txt[:800] if txt else None
     except:
         return None
 

@@ -6309,7 +6309,7 @@ class IRC:
 
 
 # ─── Ollama ─────────────────────────────────────
-def gen(prompt, maxn=80):
+def gen(prompt, maxn=256):
     try:
         d = json.dumps({
             'model': DM_MODEL, 'system': DM_SYSTEM, 'prompt': prompt,
@@ -6319,7 +6319,7 @@ def gen(prompt, maxn=80):
               headers={'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, timeout=25) as r:
             txt = json.loads(r.read()).get('response', '').strip().strip('"\'')
-            return txt[:300] if txt else None
+            return txt[:900] if txt else None
     except:
         return None
 

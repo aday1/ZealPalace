@@ -238,7 +238,7 @@ class IRC:
         return out
 
 # ─── Ollama Client ──────────────────────────────────────
-def ollama_gen(prompt, model='llama3.2', sys_prompt=None, persona='ego', temp=0.9, maxn=100, host=None):
+def ollama_gen(prompt, model='llama3.2', sys_prompt=None, persona='ego', temp=0.9, maxn=280, host=None):
     if sys_prompt is None:
         sys_prompt = OLLAMA_SYSTEMS.get(persona, OLLAMA_SYSTEMS['ego'])
     if host is None:
@@ -252,7 +252,7 @@ def ollama_gen(prompt, model='llama3.2', sys_prompt=None, persona='ego', temp=0.
               headers={'Content-Type':'application/json'})
         with urllib.request.urlopen(req, timeout=20) as r:
             txt = json.loads(r.read()).get('response','').strip().strip('"\'')
-            return txt[:150] if txt else None
+            return txt[:1200] if txt else None
     except urllib.error.URLError as e:
         return ('err', f'connection refused: {e.reason}')
     except urllib.error.HTTPError as e:
@@ -875,7 +875,7 @@ class Brain:
             f'Use classic text adventure format. Be funny and dramatic.'
         )
         fb = f'> You are at {pos}. A blinking cursor mocks you from the darkness. Exits: NOWHERE.'
-        resp = self._generate('adventure', prompt, fb, temp=0.9, maxn=100)
+        resp = self._generate('adventure', prompt, fb, temp=0.9, maxn=280)
         self.ego.say(CHANNEL, f'[ADVENTURE] {resp}')
         irc_log('Zealot', f'[ADVENTURE] {resp}')
         # Move to random new position

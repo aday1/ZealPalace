@@ -97,8 +97,14 @@ echo "[8/10] Configuring nginx..."
 sudo cp "$DEPLOY_DIR/zealpalace_nginx" /etc/nginx/sites-available/zealpalace
 sudo ln -sf /etc/nginx/sites-available/zealpalace /etc/nginx/sites-enabled/zealpalace
 sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-# Deploy web content
-cp "$DEPLOY_DIR/index.html" "$WEB_DIR/index.html"
+# Deploy web content (GitHub Pages canonical site/)
+if [ -d "$DEPLOY_DIR/site" ]; then
+  cp -r "$DEPLOY_DIR/site/"* "$WEB_DIR/"
+fi
+mkdir -p "$WEB_DIR/images"
+for img in "$DEPLOY_DIR"/Docs/*.jpg "$DEPLOY_DIR"/Docs/*.png "$DEPLOY_DIR"/Docs/*.jpeg; do
+  [ -f "$img" ] && cp "$img" "$WEB_DIR/images/"
+done
 cp "$DEPLOY_DIR/soul.md" "$WEB_DIR/soul.md"
 # Test config
 if sudo nginx -t 2>&1 | grep -qi 'test failed'; then
