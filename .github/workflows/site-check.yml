@@ -1,0 +1,22 @@
+name: zealpalace-site-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify site tree
+        run: |
+          test -f site/index.html
+          test -f site/style.css
+          ! grep -qi minecraft site/index.html
+          grep -q 'VoIP Phone (live)' site/index.html || true
+      - name: Python syntax (bots)
+        run: |
+          python3 -m py_compile zealot_bot.py zealot_display.py zealot_hangs.py zealot_rpg.py

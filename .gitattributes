@@ -1,2 +1,7 @@
-# Auto detect text files and perform LF normalization
 * text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.service text eol=lf
+lcd-init text eol=lf
+lcd-boot text eol=lf
+ngircd.conf text eol=lf

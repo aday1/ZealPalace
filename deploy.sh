@@ -173,9 +173,9 @@ ls -la "$BIN_DIR"/zealot_* "$BIN_DIR"/boot_plasma.py "$BIN_DIR"/lcd-init "$BIN_D
 
 echo ""
 echo "=== DEPLOYMENT COMPLETE ==="
-if [ -d "$DEPLOY_DIR/patches" ]; then
-  echo "[post] Applying LCD / SIP patches..."
+if [ -d "$DEPLOY_DIR/patches" ] && [ -f "$DEPLOY_DIR/patches/apply-on-zeal.sh" ]; then
+  echo "[post] Applying patches/ (soul merge + LCD helpers)..."
   cp -r "$DEPLOY_DIR/patches" /tmp/zealpalace-patches
-  bash "$DEPLOY_DIR/patches/apply-on-zeal.sh" /tmp/zealpalace-patches || true
+  bash /tmp/zealpalace-patches/apply-on-zeal.sh /tmp/zealpalace-patches || true
 fi
 echo "Reboot recommended: sudo reboot"
