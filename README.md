@@ -256,6 +256,8 @@ Boot sequence features a 40-second demoscene **plasma animation** (`boot_plasma.
 
 ## Deployment
 
+**Rebuild from scratch (operator):** see YomikosPapers `09-network-homelab/ZealPalace-Rebuild-and-Deploy.md` for full Pi/LCD/homelab steps. **Regenerate source with Cursor:** `.cursor/skills/regenerate-zealpalace/SKILL.md`.
+
 ### Quick Start
 
 ```bash
