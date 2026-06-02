@@ -8,7 +8,7 @@ description: >-
 
 # Regenerate ZealPalace
 
-Read [OPERATOR-VOICE-AND-PREFERENCES.md](../regenerate-shared/OPERATOR-VOICE-AND-PREFERENCES.md) first — emoji ban, `temp_/` scratch, minimal new markdown, CGA IRC terrarium family.
+Read YomikosPapers `.cursor/skills/regenerate-shared/OPERATOR-VOICE-AND-PREFERENCES.md` first — emoji ban, `temp_/` scratch, minimal new markdown, CGA IRC terrarium family.
 
 ## Source of truth (read second)
 
