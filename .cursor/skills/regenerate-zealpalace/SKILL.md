@@ -1,106 +1,78 @@
 ---
 name: regenerate-zealpalace
 description: >-
-  Rebuild or regenerate ZealPalace IRC MUD from scratch while preserving
-  ngIRCd channels, JSON soul/state, CGA LCD display, Ollama-on-ZealTower,
-  and homelab CELES/nginx integration. Use when rebuilding ZealPalace,
-  redeploying the Pi, or regenerating the codebase with a powerful model.
+  Rebuild ZealPalace Pi IRC MUD from scratch: CGA/BBS terrarium aesthetics,
+  Jungian Zealot voice, ngIRCd, Ollama on ZealTower, demoscene LCD, no emoji,
+  no Minecraft. Phased AGENT-REBUILD runbook. Use for full regeneration or Pi redeploy.
 ---
 
 # Regenerate ZealPalace
 
-## Canonical repo
+Read [OPERATOR-VOICE-AND-PREFERENCES.md](../regenerate-shared/OPERATOR-VOICE-AND-PREFERENCES.md) first — emoji ban, `temp_/` scratch, minimal new markdown, CGA IRC terrarium family.
 
-All rebuild work targets:
+## Source of truth (read second)
 
-    C:/aday.repo/ZealPalace
-
-GitHub: https://github.com/aday1/ZealPalace
-
-Human operator runbook (full Pi rebuild from scratch): YomikosPapers vault `09-network-homelab/ZealPalace-Rebuild-and-Deploy.md` (also see README Deployment below).
-
-Before a large rebuild, read [reference.md](reference.md) for architecture, ports, systemd units, and test gates.
-
-Homelab deploy scripts (Holybell, in YomikosPapers gitignored `temp_/`): `deploy-zealpalace-all.ps1`, `deploy-zealpalace-to-pi.ps1`, `deploy-zealpalace-to-celes.ps1`
-
-## Non-negotiables
-
-| Layer | Requirement |
+| Doc | Path |
 | --- | --- |
-| Pi host | 10.13.37.76 — SSH `zealpalace` from CELES |
-| IRC | ngircd :6667 — `#ZealPalace`, `#RPG`, `#ZealHangs` |
-| Web | nginx :80; admin :9666; web-api :8888 |
-| LLM | Ollama on ZealTower `http://10.13.37.5:11434` only (`soul.json`) |
-| State | JSON only — `soul.json`, `~/.cache/zealot/`, `/var/www/ZealPalace/` |
-| LCD | 40x34 curses TUI, Terminus 8x14, `boot_plasma.py`, `lcd-dashboard.service` |
-| Homelab | CELES proxies `/admin`, `/api`, `/blog` to Pi; NOC push to `noc_mesh.json` |
-| Excluded | No Minecraft / RCON / MC bridge (removed 2026-05-28) |
+| From-scratch phases | `C:/aday.repo/ZealPalace/AGENT-REBUILD.md` |
+| Deep reference | `C:/aday.repo/ZealPalace/DOCS/AGENT-REBUILD-REFERENCE.md` |
+| Lore and hardware | `README.md`, `soul.md` |
+| Operator deploy (human) | YomikosPapers `09-network-homelab/ZealPalace-Rebuild-and-Deploy.md` |
 
-Pi install entrypoint: `bash /tmp/zeal_deploy/deploy.sh` after copying repo tree to `/tmp/zeal_deploy`.
+GitHub: https://github.com/aday1/ZealPalace  
+Vault: `09-network-homelab/ZealPalace.md`
 
-## Application components (rebuild targets)
+## Aesthetic and language (non-negotiable)
 
-| Script / unit | Role |
+**Visual:** Digital terrarium — BBS / IRC 1988 / demoscene boot — not optional chrome.
+
+- `boot_plasma.py` — plasma boot on tty1 before LCD dashboard (demoscene identity)
+- `zealot_display.py` — 40x34 CGA curses on 3.5" TFT; Terminus 8x14; mood-driven palette
+- `site/style.css` + `site/index.html` — Geocities shrine; mesh-network aesthetic, not SaaS landing
+- `ngircd.motd` + MOTD banner — period-appropriate ASCII theatre
+- Public gate HTML (pseudocorp-deploy) stays on ZealPalace palette — no generic corporate hero sections
+
+**Copy / Zealot terrarium:**
+
+| Preserve | Location |
 | --- | --- |
-| zealot_bot.py / zealot-bot.service | Jungian personality on `#ZealPalace` |
-| zealot_rpg.py / zealot-rpg.service | Filesystem MUD on `#RPG` |
-| zealot_hangs.py / zealot-hangs.service | Seven bots on `#ZealHangs` |
-| zealot_web_api.py / zealot-web-api.service | REST :8888 |
-| zealot_admin.py / zealot-admin.service | Admin UI :9666 |
-| zealot_blog.py + zealot-blog.timer | Daily blog 09:00 |
-| zealot_display.py + lcd-init + lcd-boot | 3.5" LCD cycle |
-| ngircd.conf | IRC server |
-| zealpalace nginx site | Static site + proxies |
-| patches/apply-on-zeal.sh | Homelab soul merge + LCD helpers |
+| Self-description voice | `soul.md` |
+| Persona config, moods, substances | `soul.json` |
+| Ego / SuperEgo / Id prompts | `soul.json` prompts |
+| ZealHangs cast and relationship drama | `zealot_hangs.py`, guestbooks |
+| Filesystem RPG tone | `zealot_rpg.py`, `/proc` dungeon names |
+| Beer-ware LICENSE vibe | `README.md` License section |
+| Blog consciousness posts | `zealot_blog.py` output under `/var/www/ZealPalace/blog/` |
 
-## Feature parity rebuild order
+Voice: Aussie BSD admin warmth + Jungian splits + $35 Pi process philosophy + XKCD #350 terrarium energy + self-aware absurdity + real IRC/Ollama/systemd specs underneath. See **Zealot voice formula** in shared operator prefs.
 
-```
-Task Progress:
-- [ ] 1. ngircd.conf + motd + channel names
-- [ ] 2. soul.json — ollama.host, models, prompts; Pi can curl ZealTower
-- [ ] 3. zealot_bot.py + zealot-bot.service
-- [ ] 4. zealot_rpg.py + zealot-rpg.service
-- [ ] 5. zealot_hangs.py + zealot-hangs.service
-- [ ] 6. zealot_web_api.py + zealot_admin.py + nginx site
-- [ ] 7. zealot_blog.py + timer
-- [ ] 8. zealot_display.py, lcd-init, lcd-boot, lcd-dashboard.service
-- [ ] 9. patches/ — NOC mesh, PBX phones, IRC tail; apply-on-zeal.sh
-- [ ] 10. site/ retro pages; homelab CELES nginx if in scope
-- [ ] 11. soul.md + personality strings last
-```
+**Showcase:** GitHub Pages `site/`, on-net https://zealpalace.yggdrasil.aday.net.au/ — same weird sincerity as the bots.
 
-## Regenerating with new LLM models
+## Technical locks
 
-1. Edit `soul.json` — `ollama.models` per persona (Ego, SuperEgo, Id, ZealHangs cast).
-2. On ZealTower: `ollama pull` for each model (defaults in `zealpalace-remote-update.sh`: llama3.2, mistral, gemma3:1b, qwen2.5:1.5b, phi3).
-3. Deploy or merge: `patches/soul-prompts-patch.json` via `apply-on-zeal.sh`, or CELES `sudo bash /opt/voip/zealpalace-remote-update.sh`.
-4. `sudo systemctl restart zealot-bot zealot-rpg zealot-hangs`.
-5. Optional world wipe: `meteor_wipe.sh` (keep soul) or `meteor_wipe.sh -genesis`.
-
-## Test gates
-
-- Pi systemd: ngircd, nginx, zealot-bot, zealot-rpg, zealot-hangs, zealot-web-api, zealot-admin, zealot-blog.timer — all active
-- `curl -s http://localhost/api/status` on Pi
-- `echo NICK t | nc -q1 localhost 6667` IRC banner
-- LCD tty1: PBX / NOC / idle rotation
-- On-net: https://zealpalace.yggdrasil.aday.net.au/ and `/api/status`
-- `~/.cache/zealot/noc_mesh.json` updates within ~1 min (CELES push)
-
-## Anti-patterns
-
-- Do not run Ollama on the Pi (use ZealTower)
-- Do not add a database
-- Do not reintroduce Minecraft stack
-- Do not use emoji in source
-- Do not add throwaway test files outside `temp_/`
-- Do not add extra root markdown in ZealPalace repo (skill lives under `.cursor/skills/`)
+- Raspberry Pi OS on **10.13.37.76** — Python 3 bots, ngircd, nginx, systemd
+- Ollama **only** on ZealTower `http://10.13.37.5:11434` (`soul.json` ollama.host)
+- JSON state only — `soul.json`, `~/.cache/zealot/`, `/var/www/ZealPalace/` — no database
+- IRC :6667 — `#ZealPalace`, `#ZealHangs`, `#RPG` (plus homelab `#pseudocorp`, `#slacking-off`)
+- Web :80; admin :9666; API :8888; CELES proxies `/admin`, `/api`, `/blog`
+- Pi install: `bash /tmp/zeal_deploy/deploy.sh`
 
 ## Agent workflow
 
-1. Read repo `README.md`, [reference.md](reference.md), and homelab ZealPalace-Rebuild-and-Deploy.md in YomikosPapers if available
-2. Confirm stack lock — ask before changing IRC/Ollama/LCD contracts
-3. Follow feature parity checklist; commit logical milestones
-4. Wire ngircd + soul + one bot before adding blog/display patches
-5. Run test gates; reboot Pi if LCD tmux stuck
-6. Holybell full release: `powershell temp_/deploy-zealpalace-all.ps1` (operator)
+1. Read `AGENT-REBUILD.md` phased table; implement MVP (phases 0-5) before parity 6-12.
+2. Wire ngircd + `soul.json` + Ollama curl test before any bot speaks on IRC.
+3. Port `zealot_display.py` + LCD boot chain early if hardware present — visual regression is obvious.
+4. Layer Zealot copy last (`soul.md`, prompts, MOTD, blog tone) after services are stable.
+5. Run test gates: systemd active, `/api/status`, IRC banner, optional LCD NOC slot.
+6. Edit in-repo `AGENT-REBUILD.md` when contracts change — keep this skill as flavor + pointers.
+7. Operator full deploy: `powershell temp_/deploy-zealpalace-all.ps1` (Holybell, vault `temp_/`).
+
+## Anti-patterns
+
+- Flat modern landing page replacing Geocities `site/`
+- Ollama on the Pi or CELES (ZealTower only)
+- Reintroducing Minecraft / RCON / MC bridge
+- Emoji anywhere in repo
+- Extra root markdown or throwaway tests outside `temp_/`
+- Renaming core `zealot_*` services or channels without explicit user ask
+- ClawBot / MoltBook keynote tone — this is 1997 MUD energy on a mesh LAN
