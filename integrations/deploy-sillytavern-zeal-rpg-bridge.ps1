@@ -142,6 +142,14 @@ nohup /usr/local/bin/node "$BRIDGE_DIR/sillytavern-zeal-rpg-bridge.mjs" >> "$BRI
 echo $! > "$BRIDGE_DIR/bridge.pid"
 SH
     chmod 0755 "$BRIDGE_DIR/restart-bridge.sh"
+    if [ -d /etc/cron.d ]; then
+        cat > /etc/cron.d/zeal-rpg-bridge <<SH
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+@reboot root "$BRIDGE_DIR/restart-bridge.sh"
+SH
+        chmod 0644 /etc/cron.d/zeal-rpg-bridge
+    fi
     restart_sillytavern
     wait_for_cards
     "$BRIDGE_DIR/restart-bridge.sh"
