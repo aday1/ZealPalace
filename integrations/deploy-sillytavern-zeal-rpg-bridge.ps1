@@ -154,6 +154,7 @@ $Remote = $RemoteTemplate `
     -replace "__BRIDGE_DIR__", $BridgeDir `
     -replace "__EXTENSION_DIR__", $ExtensionDir `
     -replace "__SERVICE_NAME__", $ServiceName
+$Remote = $Remote -replace "`r`n", "`n" -replace "`r", "`n"
 
 Invoke-BridgeRemote $Remote
 
