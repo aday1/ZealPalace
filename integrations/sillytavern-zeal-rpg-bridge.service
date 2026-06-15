@@ -1,0 +1,16 @@
+[Unit]
+Description=SillyTavern to ZealPalace RPG bridge
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=ZEAL_BRIDGE_CONFIG=/opt/sillytavern/zeal-bridge/config.json
+WorkingDirectory=/opt/sillytavern/zeal-bridge
+ExecStart=/usr/local/bin/node /opt/sillytavern/zeal-bridge/sillytavern-zeal-rpg-bridge.mjs
+Restart=always
+RestartSec=8
+
+[Install]
+WantedBy=multi-user.target

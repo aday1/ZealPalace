@@ -256,6 +256,8 @@ Boot sequence features a 40-second demoscene **plasma animation** (`boot_plasma.
 
 ## Deployment
 
+**Rebuild from scratch:** `AGENT-REBUILD.md` (phased runbook) and `DOCS/AGENT-REBUILD-REFERENCE.md`. **Operator deploy (Pi/LCD/homelab):** YomikosPapers `09-network-homelab/ZealPalace-Rebuild-and-Deploy.md`. **Cursor regen (voice + aesthetics):** `.cursor/skills/regenerate-zealpalace/SKILL.md` — read `regenerate-shared/OPERATOR-VOICE-AND-PREFERENCES.md` in the vault for shared prefs.
+
 ### Quick Start
 
 ```bash
