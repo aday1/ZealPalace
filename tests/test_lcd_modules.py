@@ -1,0 +1,45 @@
+import unittest
+
+from zealot_lcd_feeds import LcdEvent, dedupe_events, parse_local_line
+from zealot_lcd_render import WIDTH, event_lines, render_text_frame
+
+
+class LcdFeedTests(unittest.TestCase):
+    def test_parse_local_privmsg(self):
+        event = parse_local_line("RPG", "#RPG", "12:54a <Rift> communes with Vector", 1.0)
+        self.assertEqual(event.source, "RPG")
+        self.assertEqual(event.nick, "Rift")
+        self.assertIn("communes", event.text)
+
+    def test_parse_local_action(self):
+        event = parse_local_line("RPG", "#RPG", "12:54a * Hex travels to #RPG Channel Road", 1.0)
+        self.assertEqual(event.kind, "action")
+        self.assertEqual(event.nick, "Hex")
+
+    def test_dedupe_keeps_one(self):
+        one = LcdEvent("ST", "bridge", "Yomiko", "memory", sort_ts=1)
+        two = LcdEvent("ST", "bridge", "Yomiko", "memory", sort_ts=2)
+        self.assertEqual(len(dedupe_events([one, two])), 1)
+
+
+class LcdRenderTests(unittest.TestCase):
+    def test_event_lines_fit_width(self):
+        event = LcdEvent("ST", "bridge", "Yomiko", "x" * 120, canon="sillytavern")
+        for row, _style in event_lines(event, WIDTH):
+            self.assertLessEqual(len(row), WIDTH)
+
+    def test_frame_is_fixed_size(self):
+        snapshot = {
+            "events": [LcdEvent("RPG", "#RPG", "DM", "hello", sort_ts=1)],
+            "bridge": {"ok": True, "hot_zone": "Crystal Mesh", "npc_count": 1, "players_total": 2, "gm_pending": []},
+            "status": {"vector_ok": True, "pbx_api_ok": True},
+            "celes": {"fresh": False},
+            "direct_irc": {"ok": True},
+        }
+        frame = render_text_frame(snapshot, now=0)
+        self.assertEqual(len(frame), 34)
+        self.assertTrue(all(len(row) == WIDTH for row in frame))
+
+
+if __name__ == "__main__":
+    unittest.main()

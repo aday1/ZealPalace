@@ -28,16 +28,20 @@ print("  merged soul.json")
 PY
 fi
 
-sudo systemctl restart zealot-bot zealot-rpg zealot-hangs zealot-display 2>/dev/null || true
+sudo systemctl restart zealot-bot zealot-rpg zealot-hangs 2>/dev/null || true
 
-if [ -f "$PATCH_DIR/zeal_apply_lcd_fixes.py" ]; then
-  for f in zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py; do
-    [ -f "$PATCH_DIR/$f" ] && cp "$PATCH_DIR/$f" "$HOME/.local/bin/" && chmod +x "$HOME/.local/bin/$f"
-  done
-  python3 "$PATCH_DIR/zeal_apply_lcd_fixes.py" || true
-  python3 "$PATCH_DIR/zeal_fix_display_now.py" || true
-  python3 "$PATCH_DIR/zeal_patch_display_unstick.py" || true
+for f in zealot_display.py lcd-init zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py \
+         zealot_lcd_feeds.py zealot_lcd_render.py zealot_navi_ticker.py zealot_display_loop.sh; do
+  [ -f "$PATCH_DIR/$f" ] && cp "$PATCH_DIR/$f" "$HOME/.local/bin/" && chmod +x "$HOME/.local/bin/$f"
+done
+
+if [ -f "$PATCH_DIR/zeal_lcd_watchdog.sh" ]; then
   bash "$PATCH_DIR/zeal_lcd_watchdog.sh" || true
+fi
+
+if [ -x "$HOME/.local/bin/lcd-init" ]; then
+  pkill -f 'python3.*zealot_display.py' 2>/dev/null || true
+  "$HOME/.local/bin/lcd-init" >/dev/null 2>&1 || true
 fi
 
 echo "=== done ==="

@@ -55,6 +55,7 @@ echo "[5/10] Deploying scripts..."
 for script in zealot_bot.py zealot_display.py boot_plasma.py zealot_blog.py \
              zealot_rpg.py zealot_hangs.py zealot_web_api.py zealot_admin.py \
              zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py \
+             zealot_lcd_feeds.py zealot_lcd_render.py zealot_navi_ticker.py zealot_display_loop.sh \
              lcd-init lcd-boot; do
     if [ -f "$DEPLOY_DIR/$script" ]; then
         cp "$DEPLOY_DIR/$script" "$BIN_DIR/$script"
