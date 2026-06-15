@@ -56,6 +56,56 @@ Use when the repo on Holybell is already correct and you only need runtime insta
 
 **Full parity:** phases 6-12 and homelab deploy.
 
+This is a **from-scratch rebuild runbook** for the Pi IRC MUD stack (not Minecraft).
+
+## Rebuild from scratch
+
+### Prerequisites
+
+- Raspberry Pi (or Linux VM) on LAN
+- Python 3.10+, ngIRCd, systemd
+- Ollama reachable at 10.13.37.5:11434 for bot replies (ZealTower)
+- Optional: 3.5" LCD + patches in `patches/`
+
+### Path A (recommended): clone on Pi
+
+    git clone https://github.com/aday1/ZealPalace.git
+    cd ZealPalace
+
+### Path B: empty directory
+
+Create minimum files:
+
+    ZealPalace/
+      ngircd.conf
+      soul.json
+      zealot_bot.py
+      zealot_rpg.py
+      zealot_hangs.py
+      zealot_web_api.py
+      zealot-admin.service   # unit templates
+      site/index.html
+      deploy.sh
+
+Copy systemd units from this repo's `*.service` files as reference.
+
+### Phased rebuild
+
+| Phase | What to build | Done when |
+| --- | --- | --- |
+| 0 | `ngircd.conf` + motd; ngIRCd listens :6667 | `nc host 6667` connects |
+| 1 | `zealot_bot.py`: connect IRC, respond on `#ZealPalace` with Ollama | Bot joins channel and replies |
+| 2 | `soul.json` persona + `zealot_admin.py` / admin HTTP | `/admin/` loads on Pi :80 |
+| 3 | `zealot_rpg.py`: filesystem-backed RPG commands | `#RPG` commands mutate world state |
+| 4 | `zealot_hangs.py`: relationship/drama loop on `#ZealHangs` | Hangs channel shows autonomous drama |
+| 5 | `zealot_web_api.py` + `zealot-blog.service` timer | `GET /api/status` returns JSON |
+| 6 | `site/` static pages; GitHub Pages workflow | https://aday1.github.io/ZealPalace/ works |
+| 7 | CELES nginx proxy + `deploy-zealpalace-*.ps1` from vault | https://zealpalace.yggdrasil.aday.net.au/ proxies Pi |
+
+**MVP:** phases 0-1 (IRC + one bot).
+
+**Done when (full):** all systemd units active, LCD optional, public + on-net URLs 200.
+
 ## Canonical paths
 
 | Field | Value |
