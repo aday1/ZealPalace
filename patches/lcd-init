@@ -9,38 +9,41 @@ SESSION="lcd"
 tmux kill-session -t "$SESSION" 2>/dev/null
 sleep 0.5
 
-# LCD hardware: 320x480 TFT with TerminusBold14 = 40 cols × 34 rows
-# These are FIXED constants — never read from terminal/SSH
+# LCD hardware: 320x480 TFT with TerminusBold14 = 40 cols x 34 rows
 LCD_COLS=40
 LCD_ROWS=34
-# Subtract 1 row for tmux status bar
+# Subtract 1 row for tmux status bar (physical bottom row on TFT)
 TMUX_ROWS=$((LCD_ROWS - 1))
-tmux new-session -d -s "$SESSION" -x "$LCD_COLS" -y "$TMUX_ROWS"
 
-# Lock tmux to use the smallest client size (the LCD), not the newest
-# This prevents SSH attachments from resizing the session
+HOST_SHORT=$(hostname -s 2>/dev/null | cut -c1-8)
+LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+tmux new-session -d -s "$SESSION" -x "$LCD_COLS" -y "$TMUX_ROWS" \
+    "export LCD_COLS=$LCD_COLS LCD_ROWS=$LCD_ROWS TERM=linux; exec bash \"$HOME/.local/bin/zealot_display_loop.sh\""
+
 tmux set-option -t "$SESSION" window-size smallest 2>/dev/null
-# Also set aggressive-resize so panes don't expand to larger clients
 tmux set-window-option -t "$SESSION" aggressive-resize on 2>/dev/null
 
-# RPG-inspired tmux status bar (Nethack green/cyan aesthetic)
-tmux set-option -g status-style 'bg=black,fg=green' 2>/dev/null
-tmux set-option -g status-left '#[fg=cyan,bold]⚔ ZEAL #[fg=yellow]│ ' 2>/dev/null
-tmux set-option -g status-right '#[fg=magenta]│ #[fg=green]%H:%M' 2>/dev/null
-tmux set-option -g status-left-length 20 2>/dev/null
-tmux set-option -g message-style 'bg=black,fg=yellow,bold' 2>/dev/null
-tmux set-option -g pane-border-style 'fg=blue' 2>/dev/null
-tmux set-option -g pane-active-border-style 'fg=cyan' 2>/dev/null
+# Mesh status bar — hide tmux window list (was leaking as "2:$" on the TFT)
+tmux set-option -t "$SESSION" status-style 'bg=black,fg=green' 2>/dev/null
+tmux set-option -t "$SESSION" status-left '' 2>/dev/null
+tmux set-option -t "$SESSION" status-left-length 0 2>/dev/null
+tmux set-window-option -t "$SESSION" window-status-format '' 2>/dev/null
+tmux set-window-option -t "$SESSION" window-status-current-format '' 2>/dev/null
+tmux set-option -t "$SESSION" status-justify left 2>/dev/null
+tmux set-option -t "$SESSION" status-right "#[fg=green]${HOST_SHORT} ${LAN_IP} #[fg=yellow]%I:%M %p" 2>/dev/null
+tmux set-option -t "$SESSION" status-right-length 40 2>/dev/null
+tmux set-option -t "$SESSION" message-style 'bg=black,fg=yellow,bold' 2>/dev/null
+tmux set-option -t "$SESSION" pane-border-style 'fg=blue' 2>/dev/null
+tmux set-option -t "$SESSION" pane-active-border-style 'fg=cyan' 2>/dev/null
 
-# Window 1: Main Zealot Display (curses TUI with avatar + merged IRC stream)
-tmux rename-window -t "${SESSION}:1" 'zealot'
-tmux send-keys -t "${SESSION}:1" 'export TERM=linux; bash "$HOME/.local/bin/zealot_display_loop.sh"' Enter
-
-# Window 2: Shell (escape hatch)
-tmux new-window -t "${SESSION}" -n 'sh'
+# Short window names for manual tmux attach (not shown on bar)
+tmux rename-window -t "${SESSION}:1" 'z'
+tmux new-window -t "${SESSION}" -n '$'
 tmux send-keys -t "${SESSION}:2" 'export TERM=linux' Enter
-
-# Select window 1 (zealot display) as default
 tmux select-window -t "${SESSION}:1"
+# Re-apply after second window exists — otherwise default #I:#W wins
+tmux set-window-option -t "$SESSION" window-status-format '' 2>/dev/null
+tmux set-window-option -t "$SESSION" window-status-current-format '' 2>/dev/null
 
-echo "LCD session initialized: ${LCD_COLS}x${LCD_ROWS}"
+echo "LCD session initialized: ${LCD_COLS}x${LCD_ROWS} bar=${HOST_SHORT} ${LAN_IP}"

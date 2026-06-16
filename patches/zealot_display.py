@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""ZealPalace LCD hybrid ticker.
+"""ZealPalace LCD — polished hybrid terrarium dashboard.
 
-This is the clean, first-class replacement for the older patched display file.
-It renders a fixed 40x34 curses UI from typed feeds: IRC, Crystal Mesh bridge,
-SillyTavern companion continuity, PBX, NOC, Navi, and local fallbacks.
+Full 40x34 curses UI on the 320x480 TFT: calm demoscene header, rotating mode
+panels (BOOT AGE, NOC disk bars, agents, RPG), calendar footer, SIP/WOPR overlays.
 """
 from __future__ import annotations
 
@@ -14,26 +13,33 @@ import time
 from pathlib import Path
 
 from zealot_lcd_feeds import CACHE, IrcTap, collect_snapshot, now_iso
+from zealot_lcd_feeds import FEED_NOISE_RE
 from zealot_lcd_render import (
     HEIGHT,
     WIDTH,
+    MARQUEE_SPEED,
+    SCROLLER_SPEED,
+    lcd_frame_cols,
+    anim_now,
     banner_text,
     calendar_line,
     chunky_scroller,
     comet_line,
     demoscene_greetz,
-    event_lines,
+    event_segments,
     fit,
     gpu_summary,
     header_title,
+    lcd_status_line,
     marquee,
-    mode_name,
     mode_art,
+    mode_name,
     motivational_line,
     pad,
     panel_lines,
-    raster_bar,
+    section_bar,
     sparkle_line,
+    static_rule,
     ticker_text,
     tunnel_line,
 )
@@ -54,29 +60,73 @@ except Exception:  # pragma: no cover - optional on development hosts
     SipCallFlash = None
     poll_sip_call_flash = None
 
+try:
+    from zealot_wopr_lcd import draw_wopr_overlay, poll_joshua_wopr
+except Exception:  # pragma: no cover - optional on development hosts
+    poll_joshua_wopr = None
+    draw_wopr_overlay = None
+
+try:
+    from lcd_tmux_bar import set_tmux_bar
+except Exception:  # pragma: no cover - optional on development hosts
+    def set_tmux_bar(
+        *,
+        snapshot: dict | None = None,
+        mode: str | None = None,
+        wopr_caller: str | None = None,
+        force: bool = False,
+    ) -> None:
+        pass
+
 
 os.environ["TERM"] = os.environ.get("TERM") or "linux"
 CHAT_FIFO = CACHE / "chat_in"
 HEARTBEAT = CACHE / "lcd_heartbeat"
 ERR_LOG = Path("/tmp/zealot_display_err.log")
 
-PAIR_HEADER = 1
-PAIR_TICKER = 2
-PAIR_RPG = 3
-PAIR_ST = 4
-PAIR_PBX = 5
-PAIR_NOC = 6
-PAIR_WARN = 7
-PAIR_BAD = 8
-PAIR_DIM = 9
-PAIR_INPUT = 10
-PAIR_EVENT = 11
-PAIR_ART = 12
-PAIR_GLINT = 13
-PAIR_BANNER = 14
-PAIR_RASTER = 15
-PAIR_GREETZ = 16
-PAIR_MOTIVE = 17
+# CGA palette — foreground on black for TFT readability
+PAIR_BORDER = 1      # dim cyan — rules only
+PAIR_TITLE = 2       # bright cyan — header
+PAIR_TREE = 3        # white — idle tab
+PAIR_TREE_SEL = 4    # yellow — active tab (no reverse)
+PAIR_PANEL = 5       # white — panel labels
+PAIR_CYAN = 6        # cyan on black — NOC / headers
+PAIR_MAG = 7         # magenta on black — ST / bridge
+PAIR_GREEN = 8       # green on black — RPG / OK
+PAIR_YELLOW = 9      # yellow on black — PBX / warn
+PAIR_RED = 10        # red on black — alerts
+PAIR_DIM = 11        # white dim — SYS
+PAIR_INPUT = 12      # green on black — command line
+PAIR_LOG = 13        # white on black — IRC log
+PAIR_TICK = 14       # magenta on black — tick bar
+PAIR_ART = 15        # cyan on black — ASCII art
+PAIR_TAB_ON = 16     # yellow bold — active mode tab
+PAIR_ZP = 17
+PAIR_ZH = 18
+PAIR_RPG = 19
+PAIR_ST = 20
+PAIR_PBX = 21
+PAIR_PBX_CALL = 25
+PAIR_NOC = 22
+PAIR_RGB = 23
+PAIR_GMQ = 24
+PAIR_MOTD = 26       # bright yellow — MOTD body
+PAIR_MOTD_FX = 27    # dim cyan — scroller edge glyphs only
+PAIR_IRC_CHAN = 28   # cyan — channel tag
+PAIR_IRC_MSG = 29    # white — message body
+
+_FRAME_W = WIDTH
+_FRAME_H = HEIGHT
+
+
+def begin_frame(stdscr) -> tuple[int, int]:
+    """Match render width/height to the live TFT curses geometry."""
+    global _FRAME_W, _FRAME_H
+    screen_h, screen_w = stdscr.getmaxyx()
+    fallback_w = lcd_frame_cols(WIDTH)
+    _FRAME_W = max(32, screen_w) if screen_w > 0 else fallback_w
+    _FRAME_H = max(8, min(HEIGHT, screen_h)) if screen_h > 0 else HEIGHT
+    return _FRAME_W, _FRAME_H
 
 
 def heartbeat(now: float | None = None) -> None:
@@ -107,23 +157,35 @@ def init_colors() -> None:
     curses.start_color()
     curses.use_default_colors()
     pairs = (
-        (PAIR_HEADER, curses.COLOR_CYAN, curses.COLOR_BLACK),
-        (PAIR_TICKER, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_BORDER, curses.COLOR_CYAN, curses.COLOR_BLACK),
+        (PAIR_TITLE, curses.COLOR_CYAN, curses.COLOR_BLACK),
+        (PAIR_TREE, curses.COLOR_WHITE, curses.COLOR_BLACK),
+        (PAIR_TREE_SEL, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_PANEL, curses.COLOR_WHITE, curses.COLOR_BLACK),
+        (PAIR_CYAN, curses.COLOR_CYAN, curses.COLOR_BLACK),
+        (PAIR_MAG, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
+        (PAIR_GREEN, curses.COLOR_GREEN, curses.COLOR_BLACK),
+        (PAIR_YELLOW, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_RED, curses.COLOR_RED, curses.COLOR_BLACK),
+        (PAIR_DIM, curses.COLOR_WHITE, curses.COLOR_BLACK),
+        (PAIR_INPUT, curses.COLOR_GREEN, curses.COLOR_BLACK),
+        (PAIR_LOG, curses.COLOR_WHITE, curses.COLOR_BLACK),
+        (PAIR_TICK, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
+        (PAIR_ART, curses.COLOR_CYAN, curses.COLOR_BLACK),
+        (PAIR_TAB_ON, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_ZP, curses.COLOR_CYAN, curses.COLOR_BLACK),
+        (PAIR_ZH, curses.COLOR_GREEN, curses.COLOR_BLACK),
         (PAIR_RPG, curses.COLOR_GREEN, curses.COLOR_BLACK),
         (PAIR_ST, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
         (PAIR_PBX, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_PBX_CALL, curses.COLOR_YELLOW, curses.COLOR_BLACK),
         (PAIR_NOC, curses.COLOR_CYAN, curses.COLOR_BLACK),
-        (PAIR_WARN, curses.COLOR_YELLOW, curses.COLOR_BLACK),
-        (PAIR_BAD, curses.COLOR_RED, curses.COLOR_BLACK),
-        (PAIR_DIM, curses.COLOR_WHITE, curses.COLOR_BLACK),
-        (PAIR_INPUT, curses.COLOR_GREEN, curses.COLOR_BLACK),
-        (PAIR_EVENT, curses.COLOR_WHITE, curses.COLOR_BLACK),
-        (PAIR_ART, curses.COLOR_BLUE, curses.COLOR_BLACK),
-        (PAIR_GLINT, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
-        (PAIR_BANNER, curses.COLOR_RED, curses.COLOR_BLACK),
-        (PAIR_RASTER, curses.COLOR_BLUE, curses.COLOR_BLACK),
-        (PAIR_GREETZ, curses.COLOR_GREEN, curses.COLOR_BLACK),
-        (PAIR_MOTIVE, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_RGB, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
+        (PAIR_GMQ, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
+        (PAIR_MOTD, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_MOTD_FX, curses.COLOR_CYAN, curses.COLOR_BLACK),
+        (PAIR_IRC_CHAN, curses.COLOR_CYAN, curses.COLOR_BLACK),
+        (PAIR_IRC_MSG, curses.COLOR_WHITE, curses.COLOR_BLACK),
     )
     for pair, fg, bg in pairs:
         try:
@@ -133,48 +195,70 @@ def init_colors() -> None:
 
 
 def attr_for(style: str, bold: bool = False, now: float | None = None, row: int = 0) -> int:
-    if style == "GLINT":
-        cycle = (PAIR_HEADER, PAIR_TICKER, PAIR_ST, PAIR_NOC)
-        pair = cycle[int((now or 0) * 5 + row) % len(cycle)]
-    elif style == "ART":
-        cycle = (PAIR_ART, PAIR_RPG, PAIR_ST, PAIR_NOC)
-        pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
-    elif style == "BANNER":
-        pair = PAIR_BANNER if int((now or 0) * 2) % 2 else PAIR_RPG
-    elif style == "RASTER":
-        cycle = (PAIR_RASTER, PAIR_NOC, PAIR_TICKER, PAIR_RPG)
-        pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
-    elif style == "GREETZ":
-        cycle = (PAIR_GREETZ, PAIR_ST, PAIR_TICKER, PAIR_NOC)
-        pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
-    elif style == "MOTIVE":
-        pair = PAIR_MOTIVE if int((now or 0) // 2) % 2 else PAIR_RPG
-    elif style == "RGB":
-        cycle = (PAIR_BAD, PAIR_RPG, PAIR_NOC, PAIR_ST, PAIR_TICKER)
-        pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
-    else:
-        pair = {
+    phase = anim_now(now)
+    pair = {
+        "BORDER": PAIR_BORDER,
+        "TITLE": PAIR_TITLE,
+        "TREE": PAIR_TREE,
+        "TREE_SEL": PAIR_TREE_SEL,
+        "TAB": PAIR_TREE,
+        "TAB_ON": PAIR_TAB_ON,
+        "PANEL": PAIR_PANEL,
+        "CYAN": PAIR_CYAN,
+        "MAG": PAIR_MAG,
+        "GREEN": PAIR_GREEN,
+        "YELLOW": PAIR_YELLOW,
+        "RED": PAIR_RED,
+        "SYS": PAIR_DIM,
+        "INPUT": PAIR_INPUT,
+        "LOG": PAIR_LOG,
+        "TICK": PAIR_TICK,
+        "ART": PAIR_ART,
+
         "RPG": PAIR_RPG,
         "ST": PAIR_ST,
-        "GMQ": PAIR_ST,
+        "GMQ": PAIR_GMQ,
         "PBX": PAIR_PBX,
+        "PBX_CALL": PAIR_PBX_CALL,
         "PCORP": PAIR_PBX,
         "NOC": PAIR_NOC,
-        "SYS": PAIR_DIM,
-        "ZH": PAIR_EVENT,
-        "ZP": PAIR_EVENT,
-        "IRC": PAIR_EVENT,
-        "INPUT": PAIR_INPUT,
-        }.get(style, PAIR_EVENT)
+        "RGB": PAIR_RGB,
+        "ZH": PAIR_ZH,
+        "ZP": PAIR_ZP,
+        "IRC": PAIR_LOG,
+        "EVENT": PAIR_LOG,
+        "GLINT": PAIR_CYAN,
+        "GREETZ": PAIR_MOTD,
+        "MOTIVE": PAIR_MOTD,
+        "MOTD": PAIR_MOTD,
+        "MOTD_FX": PAIR_MOTD_FX,
+        "IRC_CHAN": PAIR_IRC_CHAN,
+        "IRC_TIME": PAIR_DIM,
+        "IRC_MSG": PAIR_IRC_MSG,
+        "IRC_ACT": PAIR_MAG,
+        "IRC_NICK": PAIR_YELLOW,
+        "SCROLLER": PAIR_MOTD,
+        "BANNER": PAIR_MAG,
+        "RASTER": PAIR_BORDER,
+    }.get(style, PAIR_LOG)
     attr = curses.color_pair(pair)
-    if style == "SYS":
+    if style in ("SYS", "IRC_TIME"):
         attr |= curses.A_DIM
-    if style in ("GLINT", "BANNER", "GREETZ", "MOTIVE", "RGB"):
+    if style in ("TITLE", "TAB_ON", "CYAN"):
         attr |= curses.A_BOLD
-    if style == "RASTER" and int((now or 0) * 2 + row) % 3 == 0:
-        attr |= curses.A_REVERSE
-    if style == "ART" and int((now or 0) * 3 + row) % 5 == 0:
+    if style in ("MOTD", "GREETZ", "MOTIVE", "IRC_MSG"):
         attr |= curses.A_BOLD
+    if style in ("IRC_CHAN", "IRC_NICK", "ZP", "ZH", "RPG", "ST", "PBX", "GREEN", "YELLOW", "RED"):
+        attr |= curses.A_BOLD
+    if style == "MOTD_FX":
+        attr |= curses.A_DIM
+    if style == "PBX_CALL":
+        attr |= curses.A_BOLD | curses.A_REVERSE
+        if int((now or time.time())) % 2 == 0:
+            pair = PAIR_RED
+            attr = curses.color_pair(pair) | curses.A_BOLD | curses.A_REVERSE
+    if style == "BORDER":
+        attr |= curses.A_DIM
     if bold:
         attr |= curses.A_BOLD
     return attr
@@ -189,91 +273,179 @@ def add_line(
     raw: bool = False,
     now: float | None = None,
 ) -> None:
-    if row < 0 or row >= HEIGHT:
+    if row < 0 or row >= _FRAME_H:
         return
-    value = pad(text, WIDTH) if raw else fit(text, WIDTH)
+    value = pad(text, _FRAME_W) if raw else fit(text, _FRAME_W)
     try:
-        stdscr.addnstr(row, 0, value, WIDTH, attr_for(style, bold, now, row))
+        stdscr.addnstr(row, 0, value, _FRAME_W, attr_for(style, bold, now, row))
     except curses.error:
         pass
 
 
+def add_segment_line(
+    stdscr,
+    row: int,
+    segments: list[tuple[str, str]],
+    now: float | None = None,
+) -> None:
+    if row < 0 or row >= _FRAME_H:
+        return
+    col = 0
+    for text, style in segments:
+        if col >= _FRAME_W:
+            break
+        chunk = text[: _FRAME_W - col]
+        if not chunk:
+            continue
+        try:
+            stdscr.addnstr(row, col, chunk, len(chunk), attr_for(style, now=now, row=row))
+        except curses.error:
+            pass
+        col += len(chunk)
+
+
+def drain_startup_keys(stdscr, seconds: float = 0.35) -> None:
+    """Drop tmux send-keys / shell echo that lands in the curses input queue."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if stdscr.getch() == -1:
+            time.sleep(0.03)
+
+
 def send_to_zealot(message: str) -> None:
     text = message.strip()
-    if not text:
+    if not text or FEED_NOISE_RE.search(text):
         return
     try:
         CACHE.mkdir(parents=True, exist_ok=True)
         CHAT_FIFO.write_text(text, encoding="utf-8")
     except OSError:
         pass
-    try:
-        with (CACHE / "irc.log").open("a", encoding="utf-8") as handle:
-            handle.write(time.strftime("%I:%M%p").lstrip("0").lower() + f" <aday> {text}\n")
-    except OSError:
-        pass
 
 
 def draw_raw(stdscr, row: int, text: str, pair: int, flags: int = 0) -> None:
-    if row < 0 or row >= HEIGHT:
+    if row < 0 or row >= _FRAME_H:
         return
     try:
-        stdscr.addnstr(row, 0, pad(text, WIDTH), WIDTH, curses.color_pair(pair) | flags)
+        stdscr.addnstr(row, 0, pad(text, _FRAME_W), _FRAME_W, curses.color_pair(pair) | flags)
     except curses.error:
         pass
 
 
-def draw_sip_overlay(stdscr, sip_flash, now: float, input_row: int) -> None:
-    flash_on = int(now * 4) % 2 == 0
-    bg_pair = PAIR_BAD if flash_on else PAIR_PBX
-    bg_flags = curses.A_REVERSE | curses.A_BOLD if flash_on else curses.A_BOLD
-    for row in range(input_row):
-        draw_raw(stdscr, row, " " * WIDTH, bg_pair, bg_flags)
+def _sip_overlay_allowed(sip_flash) -> bool:
+    """Joshua ext 124 keeps the normal NOC mesh unless WarGames are live (WOPR path)."""
+    if sip_flash is None:
+        return False
+    to_ext = str(getattr(sip_flash, "to_ext", "") or "").strip()
+    if to_ext == "124":
+        return False
+    return True
 
-    headline = str(getattr(sip_flash, "headline", "") or "PBX CALL")[:18]
+
+def _sip_transcript_pair(style: str) -> int:
+    return {
+        "user": PAIR_GREEN,
+        "agent": PAIR_MAG,
+        "dim": PAIR_DIM,
+    }.get(style, PAIR_LOG)
+
+
+def draw_sip_overlay(stdscr, sip_flash, now: float, input_row: int) -> None:
+    flash_on = int(anim_now(now, 2.0) // 2) % 2 == 0
+    headline = str(getattr(sip_flash, "headline", "") or "PBX CALL")[:_FRAME_W]
     state = str(getattr(sip_flash, "active_state", "") or "active").upper()
-    subline = str(getattr(sip_flash, "subline", "") or "")[:WIDTH]
-    detail = str(getattr(sip_flash, "detail", "") or "")[:WIDTH]
+    subline = str(getattr(sip_flash, "subline", "") or "")[:_FRAME_W]
+    detail = str(getattr(sip_flash, "detail", "") or "")[:_FRAME_W]
     try:
         active_lines = max(1, int(getattr(sip_flash, "active_lines", 1) or 1))
     except (TypeError, ValueError):
         active_lines = 1
 
-    draw_raw(stdscr, 0, comet_line(f"PBX {active_lines} LINE{'S' if active_lines != 1 else ''} ACTIVE", now), bg_pair, bg_flags)
-    draw_raw(stdscr, 1, sparkle_line(now), PAIR_WARN, curses.A_BOLD)
-    row = 3
-    for line in figlet_lines(headline, WIDTH, fonts=("smslant", "small", "digital", "mini"))[:6]:
-        draw_raw(stdscr, row, line, PAIR_WARN if flash_on else PAIR_PBX, curses.A_BOLD)
+    header_rows = 4
+    transcript_rows = max(1, input_row - header_rows)
+    transcript_fn = getattr(sip_flash, "transcript_lines", None)
+    if callable(transcript_fn):
+        lines = transcript_fn(_FRAME_W, transcript_rows, now)
+    else:
+        lines = [("AWAITING TRANSCRIPT...", "dim")]
+
+    for row in range(input_row):
+        draw_raw(stdscr, row, " " * _FRAME_W, PAIR_BORDER, curses.A_DIM)
+
+    title = f"CALL {headline} | {active_lines}LN {state}"[:_FRAME_W]
+    draw_raw(stdscr, 0, title, PAIR_YELLOW if flash_on else PAIR_TITLE, curses.A_BOLD | curses.A_REVERSE)
+    draw_raw(stdscr, 1, fit(subline, _FRAME_W), PAIR_CYAN, curses.A_BOLD)
+    draw_raw(stdscr, 2, fit(detail, _FRAME_W), PAIR_MAG, curses.A_BOLD)
+    draw_raw(stdscr, 3, section_bar("TRANSCRIPT", _FRAME_W), PAIR_BORDER, curses.A_DIM)
+
+    row = header_rows
+    for text, style in lines:
+        if row >= input_row:
+            break
+        pair = _sip_transcript_pair(style)
+        flags = curses.A_BOLD if style in ("user", "agent") else curses.A_DIM
+        draw_raw(stdscr, row, fit(text, _FRAME_W), pair, flags)
         row += 1
-    for text, pair in (
-        (state.center(WIDTH), PAIR_BAD if flash_on else PAIR_WARN),
-        (subline.center(WIDTH), PAIR_PBX),
-        (detail.center(WIDTH), PAIR_PBX),
-        ("SIP event from CELES PBX monitor".center(WIDTH), PAIR_DIM),
-    ):
-        draw_raw(stdscr, row, text, pair, curses.A_BOLD if pair != PAIR_DIM else curses.A_DIM)
-        row += 1
-    draw_raw(stdscr, input_row, "> call overlay active", PAIR_INPUT, curses.A_BOLD)
+
+    draw_raw(stdscr, input_row, "F1Help > live call transcript", PAIR_INPUT, curses.A_BOLD)
 
 
-def draw(stdscr, snapshot: dict, input_buf: str, now: float, sip_flash=None) -> None:
+def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flash=None) -> None:
     mode = mode_name(now)
-    screen_h, _screen_w = stdscr.getmaxyx()
-    usable_h = max(8, min(HEIGHT, screen_h))
-    input_row = usable_h - 1
+    frame_w, frame_h = begin_frame(stdscr)
+    input_row = frame_h - 1
+    footer_row = input_row - 1
     stdscr.erase()
-    if sip_flash is not None and getattr(sip_flash, "active", lambda: False)():
+    # Full-screen WOPR only during live WarGames (active game + call turns).
+    # Otherwise stay on the normal mesh dashboard; DEFCON shows in ticker/ops panel.
+    wopr_session = poll_joshua_wopr() if poll_joshua_wopr else None
+    if wopr_session and draw_wopr_overlay is not None:
+        set_tmux_bar(
+            snapshot=snapshot,
+            mode=mode,
+            wopr_caller=str(wopr_session.get("caller_ext") or "?"),
+        )
+        draw_wopr_overlay(
+            stdscr,
+            wopr_session,
+            now,
+            input_row,
+            frame_w,
+            pair_title=PAIR_TITLE,
+            pair_green=PAIR_GREEN,
+            pair_yellow=PAIR_YELLOW,
+            pair_red=PAIR_RED,
+            pair_dim=PAIR_DIM,
+            pair_input=PAIR_INPUT,
+            pair_cyan=PAIR_CYAN,
+            pair_magenta=PAIR_MAG,
+            draw_fn=draw_raw,
+        )
+        return
+    set_tmux_bar(snapshot=snapshot, mode=mode)
+    if (
+        sip_flash is not None
+        and getattr(sip_flash, "active", lambda: False)()
+        and mode != "agents"
+        and _sip_overlay_allowed(sip_flash)
+    ):
         draw_sip_overlay(stdscr, sip_flash, now, input_row)
         stdscr.refresh()
         return
 
+    call_exts = set(getattr(sip_flash, "active_exts", set()) or ()) if sip_flash is not None else set()
     add_line(stdscr, 0, comet_line(header_title(snapshot, mode).strip(), now), "GLINT", raw=True, now=now)
-    add_line(stdscr, 1, raster_bar(now), "RASTER", raw=True, now=now)
-    add_line(stdscr, 2, demoscene_greetz(snapshot, now, WIDTH), "GREETZ", raw=True, now=now)
+    add_line(stdscr, 1, static_rule(frame_w), "RASTER", raw=True, now=now)
+    add_line(stdscr, 2, demoscene_greetz(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
     add_line(
         stdscr,
         3,
-        chunky_scroller(ticker_text(snapshot) + " // " + gpu_summary(snapshot), now, WIDTH, speed=3.0),
+        chunky_scroller(
+            ticker_text(snapshot) + " // " + gpu_summary(snapshot),
+            anim_now(now),
+            frame_w,
+            speed=SCROLLER_SPEED,
+        ),
         "NOC",
         bold=True,
         raw=True,
@@ -281,35 +453,42 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, sip_flash=None) -> 
     )
 
     row = 4
-    for art_row in mode_art(mode, now, WIDTH):
+    for art_row in mode_art(mode, now, frame_w):
         add_line(stdscr, row, art_row, "ART", raw=True, now=now)
         row += 1
 
-    for idx, (text, style) in enumerate(panel_lines(snapshot, mode, WIDTH)):
-        add_line(stdscr, row, text, style, bold=(idx == 0), raw=True, now=now)
+    for idx, (text, style) in enumerate(panel_lines(snapshot, mode, frame_w, now, call_exts)):
+        if isinstance(text, list):
+            add_segment_line(stdscr, row, text, now=now)
+        else:
+            add_line(stdscr, row, text, style, bold=(idx == 0), raw=True, now=now)
         row += 1
 
-    add_line(stdscr, row, calendar_line(now, WIDTH), "SYS", raw=True, now=now)
+    add_line(stdscr, row, calendar_line(now, frame_w), "SYS", raw=True, now=now)
     row += 1
-    add_line(stdscr, row, motivational_line(snapshot, now, WIDTH), "MOTIVE", raw=True, now=now)
+    add_line(stdscr, row, motivational_line(snapshot, now, frame_w), "MOTIVE", raw=True, now=now)
     row += 1
-    add_line(stdscr, row, marquee(banner_text(snapshot), WIDTH, 10, now), "BANNER", bold=True, now=now)
+    add_line(stdscr, row, marquee(banner_text(snapshot), frame_w, MARQUEE_SPEED, now), "BANNER", bold=True, now=now)
     row += 1
-    add_line(stdscr, row, tunnel_line(now, WIDTH), "RASTER", raw=True, now=now)
+    add_line(stdscr, row, tunnel_line(now, frame_w), "RASTER", raw=True, now=now)
     row += 1
-    add_line(stdscr, row, comet_line("EVENTS", now + 2.0), "GLINT", raw=True, now=now + 2.0)
+    add_line(stdscr, row, comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
     row += 1
 
-    rows = []
+    event_slot_rows: list[list[tuple[str, str]]] = []
     for event in snapshot.get("events") or []:
-        rows.extend(event_lines(event, WIDTH))
-    event_slots = max(1, input_row - row)
-    rows = rows[-event_slots:]
-    start = row + max(0, event_slots - len(rows))
-    for idx, (text, style) in enumerate(rows):
-        add_line(stdscr, start + idx, text, style, raw=True, now=now)
+        event_slot_rows.append(event_segments(event, frame_w, now=now))
+    event_slots = max(1, footer_row - row)
+    event_slot_rows = event_slot_rows[-event_slots:]
+    start = row + max(0, event_slots - len(event_slot_rows))
+    for idx, segments in enumerate(event_slot_rows):
+        add_segment_line(stdscr, start + idx, segments, now=now)
 
-    add_line(stdscr, input_row, "> " + input_buf[-(WIDTH - 3) :], "INPUT", bold=True, now=now)
+    if input_buf:
+        input_text = fit("> " + input_buf[-(frame_w - 3) :], frame_w)
+    else:
+        input_text = lcd_status_line(snapshot, mode, now, frame_w)
+    add_line(stdscr, input_row, input_text, "INPUT", bold=True, now=now)
     stdscr.refresh()
 
 
@@ -317,7 +496,12 @@ def main(stdscr) -> None:
     curses.curs_set(0)
     init_colors()
     stdscr.nodelay(True)
-    stdscr.timeout(120)
+    stdscr.timeout(350)
+    drain_startup_keys(stdscr)
+    try:
+        stdscr.bkgd(" ", curses.color_pair(PAIR_DIM))
+    except curses.error:
+        pass
 
     CACHE.mkdir(parents=True, exist_ok=True)
     signal.signal(signal.SIGUSR1, lambda _sig, _frame: heartbeat())
@@ -330,9 +514,11 @@ def main(stdscr) -> None:
     snapshot = collect_snapshot(irc_tap)
     last_snapshot = 0.0
     input_buf = ""
+    session_tick = 0
 
     while True:
         now = time.time()
+        session_tick += 1
         heartbeat(now)
         try:
             if noc_mesh is not None:
@@ -341,7 +527,7 @@ def main(stdscr) -> None:
                     if noc_mesh.router_flashbang(stdscr):
                         heartbeat(now)
                         stdscr.refresh()
-                        time.sleep(0.08)
+                        time.sleep(0.15)
                         continue
                 except Exception:
                     pass
@@ -356,7 +542,7 @@ def main(stdscr) -> None:
                 snapshot = collect_snapshot(irc_tap)
                 last_snapshot = now
 
-            draw(stdscr, snapshot, input_buf, now, sip_flash)
+            draw(stdscr, snapshot, input_buf, now, session_tick, sip_flash)
 
             ch = stdscr.getch()
             if ch == -1:

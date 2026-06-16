@@ -334,7 +334,7 @@ class ZealHangs:
         self.conversation_history = []  # last N messages for context
         # Daily conversation budget: 2-4 autonomous events/day, resets at midnight
         self.daily_event_count = 0
-        self.daily_event_limit = random.randint(2, 4)
+        self.daily_event_limit = random.randint(10, 16)
         self.budget_date = date.today().isoformat()
         # Per-human-burst response limit: max N bot replies per human interaction
         self.human_response_count = 0
@@ -371,11 +371,11 @@ class ZealHangs:
 
         now = time.time()
         # Stagger initial timers (stretched: 3-5 events per day total)
-        self.t_conversation = now + random.randint(3600, 10800)
-        self.t_event = now + random.randint(14400, 43200)
-        self.t_topic = now + random.randint(7200, 21600)
-        self.t_arrive_leave = now + random.randint(3600, 14400)
-        self.t_guestbook = now + random.randint(3600, 14400)
+        self.t_conversation = now + random.randint(300, 1200)
+        self.t_event = now + random.randint(3600, 10800)
+        self.t_topic = now + random.randint(3600, 10800)
+        self.t_arrive_leave = now + random.randint(5400, 14400)
+        self.t_guestbook = now + random.randint(21600, 43200)
 
         while True:
             try:
@@ -390,7 +390,7 @@ class ZealHangs:
                 today = date.today().isoformat()
                 if today != self.budget_date:
                     self.daily_event_count = 0
-                    self.daily_event_limit = random.randint(3, 5)
+                    self.daily_event_limit = random.randint(10, 16)
                     self.budget_date = today
 
                 # Unban check
@@ -402,17 +402,17 @@ class ZealHangs:
                 # All autonomous chat gated by budget
                 budget_ok = self.daily_event_count < self.daily_event_limit
 
-                # Regular conversation (every 3-8 hours)
+                # Regular conversation (every 20-60 min)
                 if now > self.t_conversation and budget_ok:
                     self._do_conversation()
                     self.daily_event_count += 1
-                    self.t_conversation = now + random.randint(10800, 28800)
+                    self.t_conversation = now + random.randint(1200, 3600)
 
-                # Special events (every 8-24 hours)
+                # Special events (every 2-6 hours)
                 if now > self.t_event and budget_ok:
                     self._do_event()
                     self.daily_event_count += 1
-                    self.t_event = now + random.randint(28800, 86400)
+                    self.t_event = now + random.randint(7200, 21600)
 
                 # Arrive/leave dynamics (every 4-12 hours)
                 if now > self.t_arrive_leave:

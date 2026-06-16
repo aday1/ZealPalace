@@ -4,9 +4,10 @@
 export TERM=linux
 
 # Set console font for max TFT density (8x14 Terminus = 40x34 on 320x480)
-# Only on real TTYs, not SSH
+# Uni3 = wider unicode; regular weight is easier to read on the TFT.
 if [ -z "$SSH_CONNECTION" ]; then
-    setfont Uni2-TerminusBold14.psf.gz 2>/dev/null
+    setfont Uni3-Terminus14.psf.gz 2>/dev/null \
+      || setfont Uni2-Terminus14.psf.gz 2>/dev/null
 fi
 
 # Only run plasma once per boot (use a flag file)

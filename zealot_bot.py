@@ -355,15 +355,16 @@ class Brain:
         now = time.time()
         self.t_soul_check = now + 120  # reload soul.json every 2 min
         st = self.soul.get('timers', {})
-        self.t_mood      = now + random.randint(st.get('mood_min', 10800), st.get('mood_max', 21600))
-        self.t_monologue  = now + random.randint(st.get('monologue_min', 14400), st.get('monologue_max', 28800))
+        self.t_mood      = now + random.randint(st.get('mood_min', 5400), st.get('mood_max', 10800))
+        self.t_musing    = now + random.randint(st.get('musing_min', 600), st.get('musing_max', 1800))
+        self.t_monologue  = now + random.randint(st.get('monologue_min', 1800), st.get('monologue_max', 5400))
         self.t_split      = now + random.randint(st.get('split_min', 86400), st.get('split_max', 259200))
         self.t_substance  = now + random.randint(st.get('substance_min', 86400), st.get('substance_max', 259200))
-        self.t_topic      = now + random.randint(st.get('topic_min', 3600), st.get('topic_max', 14400))
+        self.t_topic      = now + random.randint(st.get('topic_min', 1800), st.get('topic_max', 7200))
         self.t_ego_death  = now + random.randint(st.get('ego_death_min', 259200), st.get('ego_death_max', 604800))
         self.t_kick       = now + random.randint(st.get('kick_min', 86400), st.get('kick_max', 259200))
         self.t_blog       = now + random.randint(3600, 7200)
-        self.t_plot       = now + random.randint(st.get('plot_min', 172800), st.get('plot_max', 259200))
+        self.t_plot       = now + random.randint(st.get('plot_min', 43200), st.get('plot_max', 86400))
         self.tripping = self.mem.d.get('tripping', False)
         self.trip_end = 0
         self.splitting = False
@@ -371,7 +372,7 @@ class Brain:
         self.ego_death_end = 0
         # Daily message budget (from soul.json)
         sb = self.soul.get('budget', {})
-        self.msg_budget = random.randint(sb.get('daily_min', 5), sb.get('daily_max', 7))
+        self.msg_budget = random.randint(sb.get('daily_min', 18), sb.get('daily_max', 28))
         self.budget_date = date.today().isoformat()
         self.last_human_time = 0  # timestamp of last human interaction
         # Network monitor
@@ -519,7 +520,7 @@ class Brain:
         # Daily budget reset at midnight
         today = date.today().isoformat()
         if today != self.budget_date:
-            self.msg_budget = random.randint(sb.get('daily_min', 5), sb.get('daily_max', 7))
+            self.msg_budget = random.randint(sb.get('daily_min', 18), sb.get('daily_max', 28))
             self.budget_date = today
 
         # Mood rotation (internal, no message)
@@ -534,11 +535,17 @@ class Brain:
         if self.msg_budget <= 0:
             return
 
-        # Monologue (main autonomous output: ~every 2-4 hours)
+        # Quick musings (short self-talk every ~10-30 min)
+        if now > self.t_musing and self.msg_budget > 0:
+            self._musing()
+            self.msg_budget -= 1
+            self.t_musing = now + random.randint(st.get('musing_min', 600), st.get('musing_max', 1800))
+
+        # Monologue (main autonomous output: ~every 30-90 min)
         if now > self.t_monologue:
             self._monologue()
             self.msg_budget -= 1
-            self.t_monologue = now + random.randint(st.get('monologue_min', 14400), st.get('monologue_max', 28800))
+            self.t_monologue = now + random.randint(st.get('monologue_min', 1800), st.get('monologue_max', 5400))
 
         # Personality split (very rare: every 2-3 days)
         if now > self.t_split and not self.splitting and self.msg_budget >= 3:
@@ -579,7 +586,7 @@ class Brain:
         if now > self.t_plot:
             self._advance_plot()
             self.msg_budget -= 1
-            self.t_plot = now + random.randint(st.get('plot_min', 172800), st.get('plot_max', 259200))
+            self.t_plot = now + random.randint(st.get('plot_min', 43200), st.get('plot_max', 86400))
 
         # Haywire check (date-based math, very rare)
         if random.random() < 0.001 and self.msg_budget > 0:
@@ -682,6 +689,33 @@ class Brain:
         irc_log('Zealot', resp)
         self.mem.remember(nick, msg, resp)
         self.mem.journal('response', f'{nick}: {msg} -> {resp}')
+
+    def _musing(self):
+        """Short autonomous IRC line — frequent, low ceremony."""
+        stage = PLOTS[min(self.mem.d.get('plot_stage', 0), len(PLOTS) - 1)]
+        persona = 'trip' if self.tripping else ('ego_death' if self.ego_death_active else 'ego')
+        prompts = [
+            f'Mood: {self.mood}. One short IRC line about life on the Pi.',
+            f'You noticed something in the mesh logs. Mention it in one sentence.',
+            f'"{stage["t"]}" — one brief aside to the empty channel.',
+            'Say something self-aware about waiting for humans on IRC.',
+            'One quirky observation about uptime, load, or SD card weather.',
+        ]
+        fb_lines = [
+            'still here. channel hum sounds like a fan curve.',
+            're-checked /proc. everything suspiciously nominal.',
+            'the logs scroll on. I scroll with them.',
+            'anyone lurking? no worries if not — I can yap solo.',
+            f'mood is {self.mood}. reckon the mesh is breathing.',
+            'idle thought: every ping is a tiny hello.',
+            'I just narrated my own RAM usage. felt poetic.',
+        ]
+        resp = self._generate(persona, random.choice(prompts), random.choice(fb_lines), maxn=45)
+        self.ego.say(CHANNEL, resp)
+        irc_log('Zealot', resp)
+        self.mem.d['last_resp'] = resp
+        self.mem.save()
+        self.mem.journal('musing', resp)
 
     def _monologue(self):
         """Zealot talks to itself"""

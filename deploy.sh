@@ -55,7 +55,8 @@ echo "[5/10] Deploying scripts..."
 for script in zealot_bot.py zealot_display.py boot_plasma.py zealot_blog.py \
              zealot_rpg.py zealot_hangs.py zealot_web_api.py zealot_admin.py \
              zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py \
-             zealot_lcd_feeds.py zealot_lcd_render.py zealot_navi_ticker.py zealot_display_loop.sh \
+             zealot_lcd_feeds.py zealot_lcd_render.py zealot_navi_ticker.py zealot_wopr_lcd.py \
+             joshua_wopr_menu.py zealot_pbx_pull.py lcd_tmux_bar.py zealot_display_loop.sh \
              lcd-init lcd-boot; do
     if [ -f "$DEPLOY_DIR/$script" ]; then
         cp "$DEPLOY_DIR/$script" "$BIN_DIR/$script"
@@ -73,10 +74,12 @@ echo "[6/10] Deploying bashrc + console font..."
 cp "$HOME/.bashrc" "$HOME/.bashrc.bak.$(date +%s)" 2>/dev/null || true
 cp "$DEPLOY_DIR/bashrc" "$HOME/.bashrc"
 # Set console font for TFT density (8x14 Terminus = 40x34 on 320x480)
-sudo sed -i 's/^FONTFACE=.*/FONTFACE="TerminusBold"/' /etc/default/console-setup
+# Uni3 gives broader unicode coverage; regular weight reads cleaner than bold.
+sudo sed -i 's/^FONTFACE=.*/FONTFACE="Terminus"/' /etc/default/console-setup
 sudo sed -i 's/^FONTSIZE=.*/FONTSIZE="14"/' /etc/default/console-setup
 # Apply font immediately on tty1
-sudo setfont Uni2-TerminusBold14.psf.gz -C /dev/tty1 2>/dev/null || true
+sudo setfont Uni3-Terminus14.psf.gz -C /dev/tty1 2>/dev/null \
+  || sudo setfont Uni2-Terminus14.psf.gz -C /dev/tty1 2>/dev/null || true
 echo "  Done."
 
 # ─── Deploy ngircd config ───────────────────────

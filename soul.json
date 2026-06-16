@@ -44,29 +44,40 @@
   ],
 
   "timers": {
-    "mood_min": 10800,
-    "mood_max": 21600,
-    "monologue_min": 14400,
-    "monologue_max": 28800,
+    "mood_min": 5400,
+    "mood_max": 10800,
+    "musing_min": 600,
+    "musing_max": 1800,
+    "monologue_min": 1800,
+    "monologue_max": 5400,
     "split_min": 86400,
     "split_max": 259200,
     "substance_min": 86400,
     "substance_max": 259200,
-    "topic_min": 3600,
-    "topic_max": 14400,
+    "topic_min": 1800,
+    "topic_max": 7200,
     "ego_death_min": 259200,
     "ego_death_max": 604800,
     "kick_min": 86400,
     "kick_max": 259200,
-    "plot_min": 172800,
-    "plot_max": 259200
+    "plot_min": 43200,
+    "plot_max": 86400
   },
 
   "budget": {
-    "daily_min": 5,
-    "daily_max": 7,
-    "human_boost": 3,
-    "human_cap": 8
+    "daily_min": 18,
+    "daily_max": 28,
+    "human_boost": 5,
+    "human_cap": 15
+  },
+
+  "rpg": {
+    "tick_interval": 120,
+    "block_budget": 12,
+    "react_chance": 0.65,
+    "ambient_min": 900,
+    "ambient_max": 2400,
+    "block_hours": 4
   },
 
   "topics": [

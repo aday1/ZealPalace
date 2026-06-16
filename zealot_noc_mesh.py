@@ -115,16 +115,16 @@ class NocMeshStatus:
             return False
 
         if now < self._rf_until:
-            step = int((now - self._rf_start) / 0.07) % 2
+            step = int((now - self._rf_start) / 0.18) % 2
             self._paint_fullscreen(stdscr, height, width, curses, invert=step == 1)
             return True
 
         if self._rf_next <= 0:
-            self._rf_next = now + random.uniform(8.0, 18.0)
+            self._rf_next = now + random.uniform(18.0, 32.0)
         if now >= self._rf_next:
             self._rf_start = now
-            self._rf_until = now + random.uniform(0.28, 0.50)
-            self._rf_next = now + random.uniform(12.0, 35.0)
+            self._rf_until = now + random.uniform(0.35, 0.65)
+            self._rf_next = now + random.uniform(28.0, 55.0)
             self._paint_fullscreen(stdscr, height, width, curses, invert=True)
             return True
         return False
@@ -151,7 +151,7 @@ class NocMeshStatus:
             return curses.color_pair(c_ok) | curses.A_BOLD
         if self._recent(hid):
             return curses.color_pair(c_warn) | curses.A_BOLD
-        if flash and int(time.time()) % 2 == 1:
+        if flash and int(time.time()) % 4 == 1:
             return curses.color_pair(c_bad) | curses.A_DIM
         return curses.color_pair(c_bad) | curses.A_BOLD
 
@@ -182,7 +182,7 @@ class NocMeshStatus:
             text = "WAN 1  INTERNET OK"
             attr = curses.color_pair(c_ok) | curses.A_BOLD
         else:
-            flash = int(time.time()) % 2 == 0
+            flash = int(time.time()) % 4 == 0
             text = "WAN-X  NO INTERNET!!!"
             attr = curses.color_pair(c_warn) | (curses.A_BOLD if flash else curses.A_DIM)
         try:

@@ -71,6 +71,12 @@ _NET_LAST: dict[str, float] = {}
 _REMOTE_LAST_PULL = 0.0
 _REMOTE_LAST_DATA: dict[str, Any] | None = None
 
+FEED_NOISE_RE = re.compile(
+    r"(?i)(export\s+TERM|zealot_display|display_loop(?:\.sh)?|lcd-init|"
+    r"\.local/bin/|tmux\s|bash\s+[\"']?\$|python3?\s+.*zealot_display)"
+)
+FEED_NOISE_NICKS = frozenset({"aday", "lcd-ticker", "lcd_ticker"})
+
 
 @dataclass
 class LcdEvent:
@@ -410,8 +416,19 @@ def tail_lines(path: Path, limit: int = 40) -> list[str]:
     return [row.strip() for row in rows[-limit:] if row.strip()]
 
 
-def parse_local_line(tag: str, channel: str, line: str, sort_ts: float) -> LcdEvent:
+def feed_line_is_noise(nick: str, text: str) -> bool:
+    body = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not body:
+        return True
+    if str(nick or "").strip().lower() in FEED_NOISE_NICKS and FEED_NOISE_RE.search(body):
+        return True
+    return False
+
+
+def parse_local_line(tag: str, channel: str, line: str, sort_ts: float) -> LcdEvent | None:
     text = line.strip()
+    if FEED_NOISE_RE.search(text):
+        return None
     if tag == "PBX" and text.startswith("[PBX]"):
         text = text[5:].strip()
 
@@ -444,7 +461,7 @@ def parse_local_line(tag: str, channel: str, line: str, sort_ts: float) -> LcdEv
         nick = "DungeonMaster"
         kind = "rpg"
 
-    return LcdEvent(
+    event = LcdEvent(
         source=tag,
         channel=channel,
         nick=short_text(nick, 24),
@@ -455,6 +472,9 @@ def parse_local_line(tag: str, channel: str, line: str, sort_ts: float) -> LcdEv
         sort_ts=sort_ts,
         priority=2 if tag in ("PBX", "RPG") else 1,
     )
+    if feed_line_is_noise(event.nick, event.text):
+        return None
+    return event
 
 
 def local_events(limit: int = 64) -> list[LcdEvent]:
@@ -464,7 +484,9 @@ def local_events(limit: int = 64) -> list[LcdEvent]:
         rows = tail_lines(path, max(12, limit // len(LOCAL_LOGS) + 8))
         base = now - (len(rows) * 0.2)
         for idx, row in enumerate(rows):
-            events.append(parse_local_line(tag, channel, row, base + idx * 0.2))
+            event = parse_local_line(tag, channel, row, base + idx * 0.2)
+            if event is not None:
+                events.append(event)
     return events[-limit:]
 
 
@@ -502,12 +524,16 @@ def celes_events(limit: int = 80) -> tuple[list[LcdEvent], dict[str, Any]]:
             source = "ZP"
         elif chan == "#pseudocorp":
             source = "PCORP"
+        nick = short_text(row.get("nick"), 24)
+        text = short_text(row.get("text"), 260)
+        if feed_line_is_noise(nick, text):
+            continue
         events.append(
             LcdEvent(
                 source=source,
                 channel=chan,
-                nick=short_text(row.get("nick"), 24),
-                text=short_text(row.get("text"), 260),
+                nick=nick,
+                text=text,
                 kind=str(row.get("type") or "message"),
                 canon="irc",
                 ts=ts,
@@ -829,6 +855,12 @@ def parse_irc_protocol_line(line: str) -> LcdEvent | None:
 
 
 def status_files() -> dict[str, Any]:
+    try:
+        from zealot_pbx_pull import ensure_pbx_phones_fresh
+
+        ensure_pbx_phones_fresh()
+    except Exception:
+        pass
     telemetry = {
         "local": local_system_stats(),
         "remote": remote_telemetry(),

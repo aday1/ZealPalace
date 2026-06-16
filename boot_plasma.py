@@ -2,7 +2,7 @@
 """ZEALOT Boot Plasma - Demoscene boot/login animation for TFT LCD
 Runs once on first SSH login or tty boot, then hands off to tmux.
 Uses pyfiglet for animated ASCII art typography.
-Duration: ~40 seconds plasma + 40 seconds info screen
+Duration: ~18 seconds plasma + 12 seconds info screen
 """
 import sys, math, time, os, random, shutil, subprocess
 
@@ -16,8 +16,8 @@ except ImportError:
 
 _cols, _rows = shutil.get_terminal_size((40, 34))
 W, H = _cols, _rows - 1  # leave 1 row for tmux status
-DURATION = 40.0
-FPS = 15
+DURATION = 18.0
+FPS = 10
 
 # ─── Figlet Banners (morph between fonts) ───────
 FIGLET_FONTS = ['small', 'smslant', 'cybermedium', 'digital', 'doom',
