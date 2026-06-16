@@ -17,35 +17,27 @@ from zealot_lcd_feeds import FEED_NOISE_RE
 from zealot_lcd_render import (
     HEIGHT,
     WIDTH,
-    MARQUEE_SPEED,
+    LCD_PANEL_MAX_ROWS,
     SCROLLER_SPEED,
+    compact_status_line,
     lcd_frame_cols,
+    lcd_frame_zones,
     anim_now,
-    banner_text,
     calendar_line,
     chunky_scroller,
     comet_line,
     dashboard_footer_segments,
-    dashboard_header,
-    defcon_status_line,
-    demoscene_greetz,
     event_segments,
     fit,
     gpu_summary,
     header_title,
     lcd_status_line,
-    marquee,
-    mode_art,
+    mode_art_compact,
     mode_name,
     mode_section_bar,
     pad,
     panel_lines,
-    panel_section_label,
-    section_bar,
-    sparkle_line,
-    static_rule,
     ticker_text,
-    tunnel_line,
 )
 
 try:
@@ -434,21 +426,29 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     set_tmux_bar(snapshot=snapshot, mode=mode)
     call_exts = set(getattr(sip_flash, "active_exts", set()) or ()) if sip_flash is not None else set()
     panel_mode = "agents" if sip_active else mode
-    add_line(stdscr, 0, comet_line(header_title(snapshot, panel_mode).strip(), now), "GLINT", raw=True, now=now)
+    zones = lcd_frame_zones(frame_h)
+
+    # --- Header (3 rows): title, epoch+WOPR, mesh ticker ---
     add_line(
         stdscr,
-        1,
-        dashboard_header(snapshot, panel_mode, now, tick, frame_w),
+        zones["header_start"],
+        comet_line(header_title(snapshot, panel_mode).strip(), now),
+        "GLINT",
+        raw=True,
+        now=now,
+    )
+    add_line(
+        stdscr,
+        zones["header_start"] + 1,
+        compact_status_line(snapshot, panel_mode, now, tick, frame_w),
         "SYS",
         bold=True,
         raw=True,
         now=now,
     )
-    add_line(stdscr, 2, defcon_status_line(frame_w), "PBX_CALL", bold=True, raw=True, now=now)
-    add_line(stdscr, 3, demoscene_greetz(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
     add_line(
         stdscr,
-        4,
+        zones["header_start"] + 2,
         chunky_scroller(
             ticker_text(snapshot) + " // " + gpu_summary(snapshot),
             anim_now(now),
@@ -461,21 +461,15 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         now=now,
     )
 
-    add_line(stdscr, 5, mode_section_bar(mode, frame_w, now), "CYAN", bold=True, raw=True, now=now)
-    add_line(
-        stdscr,
-        6,
-        section_bar(panel_section_label(panel_mode), frame_w),
-        "GLINT",
-        raw=True,
-        now=now,
-    )
+    # --- Mode rotator with slide countdown ---
+    add_line(stdscr, zones["mode_bar"], mode_section_bar(mode, frame_w, now), "CYAN", bold=True, raw=True, now=now)
 
-    row = 7
-    for art_row in mode_art(panel_mode, now, frame_w):
-        add_line(stdscr, row, art_row, "ART", raw=True, now=now)
-        row += 1
+    # --- Compact centered ASCII art (2 rows) ---
+    for offset, art_row in enumerate(mode_art_compact(panel_mode, now, frame_w)):
+        add_line(stdscr, zones["art_start"] + offset, art_row, "ART", raw=True, now=now)
 
+    # --- Panel zone (fixed 7 rows): NOC HOST TABLE / agents+transcript / etc. ---
+    panel_row = zones["panel_start"]
     for idx, (text, style) in enumerate(
         panel_lines(
             snapshot,
@@ -484,33 +478,33 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
             now,
             call_exts,
             sip_flash=sip_flash if sip_active else None,
+            max_rows=LCD_PANEL_MAX_ROWS,
         )
     ):
+        if panel_row >= zones["calendar_row"]:
+            break
         if isinstance(text, list):
-            add_segment_line(stdscr, row, text, now=now)
+            add_segment_line(stdscr, panel_row, text, now=now)
         else:
-            add_line(stdscr, row, text, style, bold=(idx == 0), raw=True, now=now)
-        row += 1
+            add_line(stdscr, panel_row, text, style, bold=(idx == 0), raw=True, now=now)
+        panel_row += 1
 
-    add_line(stdscr, row, calendar_line(now, frame_w), "SYS", raw=True, now=now)
-    row += 1
-    add_segment_line(stdscr, row, dashboard_footer_segments(snapshot, now, tick, frame_w), now=now)
-    row += 1
-    add_line(stdscr, row, marquee(banner_text(snapshot), frame_w, MARQUEE_SPEED, now), "BANNER", bold=True, now=now)
-    row += 1
-    add_line(stdscr, row, tunnel_line(now, frame_w), "RASTER", raw=True, now=now)
-    row += 1
-    add_line(stdscr, row, comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
-    row += 1
+    # --- Mid footer: calendar week countdown + host/motd scroller ---
+    add_line(stdscr, zones["calendar_row"], calendar_line(now, frame_w), "SYS", raw=True, now=now)
+    add_segment_line(stdscr, zones["status_row"], dashboard_footer_segments(snapshot, now, tick, frame_w), now=now)
 
+    # --- Events zone (reserved rows, tail-pinned, colored segments) ---
+    add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
     event_slot_rows: list[list[tuple[str, str]]] = []
     for event in snapshot.get("events") or []:
         event_slot_rows.append(event_segments(event, frame_w, now=now))
-    event_slots = max(1, footer_row - row)
+    event_slots = max(1, zones["events_end"] - zones["events_start"])
     event_slot_rows = event_slot_rows[-event_slots:]
-    start = row + max(0, event_slots - len(event_slot_rows))
     for idx, segments in enumerate(event_slot_rows):
-        add_segment_line(stdscr, start + idx, segments, now=now)
+        row = zones["events_start"] + idx
+        if row >= zones["events_end"]:
+            break
+        add_segment_line(stdscr, row, segments, now=now)
 
     if input_buf:
         input_text = fit("> " + input_buf[-(frame_w - 3) :], frame_w)
@@ -521,7 +515,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
             input_text = fit(f"CALL {headline} | {state} | tail live", frame_w)
         else:
             input_text = lcd_status_line(snapshot, mode, now, frame_w)
-    add_line(stdscr, input_row, input_text, "INPUT", bold=True, now=now)
+    add_line(stdscr, zones["input_row"], input_text, "INPUT", bold=True, now=now)
     stdscr.refresh()
 
 

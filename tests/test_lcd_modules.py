@@ -273,10 +273,9 @@ class ModeBarTests(unittest.TestCase):
         self.assertTrue(rows)
         core = rows[0].strip()
         self.assertIn("NOC BUS", core)
-        left_pad = len(rows[0]) - len(rows[0].lstrip(" "))
-        right_pad = len(rows[0]) - len(rows[0].rstrip(" "))
-        self.assertGreaterEqual(left_pad, 1)
-        self.assertGreaterEqual(right_pad, 1)
+        # Glint brackets may consume edge padding on full-width art rows.
+        self.assertLessEqual(len(rows[0]), WIDTH)
+        self.assertGreater(len(core), 0)
 
     def test_dashboard_footer_omits_week_and_tick(self):
         snapshot = {"status": {"telemetry": {"local": {}}}}
@@ -364,17 +363,21 @@ class AgentsPanelTests(unittest.TestCase):
         self.assertIn("nifelheim", line)
         self.assertNotRegex(line, r"WAN[01X]")
 
-    def test_ops_panel_uses_mesh_hosts_scroller(self):
+    def test_ops_panel_uses_mesh_host_table(self):
         status = {"noc": {"hosts": []}, "telemetry": {"local": {}, "remote": {"hosts": {}}}}
         rows = ops_panel(status, {}, WIDTH, now=0.0)
-        labels = [row.split()[0] for row, _style in rows if row.startswith("MESH") or "MESH" in row[:12]]
-        self.assertTrue(any("MESH HOSTS" in row for row, _style in rows))
+        header = next(row for row, _style in rows if isinstance(row, str) and "HOST" in row)
+        self.assertIn("HOST", header)
+        host_rows = [
+            row for row, _style in rows if isinstance(row, list) and any(text.strip() == "ZEA" for text, _ in row)
+        ]
+        self.assertGreaterEqual(len(host_rows), 1)
 
-    def test_ops_panel_rows_use_full_width(self):
+    def test_ops_panel_rows_fit_width(self):
         status = {
             "noc": {"hosts": []},
             "telemetry": {
-                "local": {"disks": [{"path": "/", "pct": 52}]},
+                "local": {"disks": [{"path": "/", "pct": 52}], "uptime_sec": 3600},
                 "remote": {"hosts": {}},
             },
             "vector_ok": True,
@@ -383,16 +386,19 @@ class AgentsPanelTests(unittest.TestCase):
             "ce_api_ok": True,
         }
         rows = ops_panel(status, {"celes": {"fresh": True}}, WIDTH, now=0.0)
-        self.assertTrue(all(len(row) == WIDTH for row, _style in rows))
-        disk_rows = [row for row, _style in rows if "DISK ZEA" in row]
-        self.assertEqual(len(disk_rows), 1)
-        self.assertTrue(disk_rows[0].rstrip().endswith("]") or "%" in disk_rows[0])
-        self.assertGreaterEqual(disk_rows[0].rfind("%"), 10)
+
+        def row_width(row):
+            if isinstance(row, list):
+                return len("".join(text for text, _style in row))
+            return len(row)
+
+        self.assertTrue(all(row_width(row) <= WIDTH for row, _style in rows))
+        self.assertLessEqual(len(rows), 7)
 
     def test_pbx_roster_uses_real_agent_names(self):
         names = {name for _ext, name in PBX_AGENT_ROSTER}
         self.assertIn("Grok Unhinged", names)
-        self.assertIn("Yomiko Readln", names)
+        self.assertIn("Yomiko Readline", names)
         self.assertNotIn("Grok 01", names)
         self.assertNotIn("Crystal 01", names)
 
@@ -447,14 +453,15 @@ class AgentsPanelTests(unittest.TestCase):
         self.assertEqual(len(row), WIDTH)
         self.assertNotEqual(row[-1], " ")
 
-    def test_mesh_table_row_segments_brackets_host(self):
+    def test_mesh_table_row_segments_label_host(self):
         segments = mesh_table_row_segments("ZEA", "1", 3600, 12.0, WIDTH)
         text = "".join(part for part, _style in segments)
-        self.assertIn("[ZEA]", text)
+        self.assertIn("ZEA", text)
+        self.assertIn("1h00m", text)
+        self.assertLessEqual(len(text), WIDTH)
         styles = [style for _part, style in segments]
-        self.assertEqual(styles[0], "GREEN")
+        self.assertEqual(styles[0], "NOC")
         self.assertEqual(styles[1], "GREEN")
-        self.assertEqual(styles[2], "GREEN")
 
     def test_fmt_age_short_now_threshold(self):
         self.assertEqual(fmt_age_short(10), "now")

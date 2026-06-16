@@ -47,6 +47,15 @@ except Exception:  # pragma: no cover - optional on development hosts
 WIDTH = 40
 HEIGHT = 34
 
+# Fixed TFT frame budget (40x34 TerminusBold14). Prevents header/panel/footer overlap.
+LCD_HEADER_ROWS = 3
+LCD_MODE_BAR_ROWS = 1
+LCD_ART_ROWS = 2
+LCD_PANEL_MAX_ROWS = 7
+LCD_MID_FOOTER_ROWS = 2
+LCD_EVENTS_HEADER_ROWS = 1
+LCD_EVENTS_MIN_ROWS = 8
+
 
 def lcd_frame_cols(fallback: int = WIDTH) -> int:
     """Physical TFT column count — env LCD_COLS or default 40 (320px / TerminusBold14)."""
@@ -137,7 +146,7 @@ DETAIL_SCROLL_SPEED = 10.0
 IRC_SCROLL_SPEED = 9.0
 PBX_AGENT_VISIBLE = 4
 PBX_AGENT_VISIBLE_CALL = 2
-PBX_TRANSCRIPT_ROWS = 6
+PBX_TRANSCRIPT_ROWS = 3
 HUMAN_EXTS = frozenset({"100", "101", "102", "110"})
 AGENT_EXT_W = 4
 AGENT_LAST_W = 12
@@ -964,6 +973,67 @@ def dashboard_header(snapshot: dict[str, Any], mode: str, now: float, tick: int,
 def defcon_status_line(width: int = WIDTH) -> str:
     """Centered Joshua WOPR / DEFCON strip for the hybrid dashboard header."""
     return center(joshua_defcon_ticker(), width)
+
+
+def compact_status_line(
+    snapshot: dict[str, Any],
+    mode: str,
+    now: float,
+    tick: int,
+    width: int = WIDTH,
+) -> str:
+    """Epoch clock + WOPR DEFCON on one centered row when space allows."""
+    clock = dashboard_header(snapshot, mode, now, tick, width).strip()
+    defcon = joshua_defcon_ticker().strip()
+    combo = f"{clock}  {defcon}"
+    if len(combo) <= width:
+        return center(combo, width)
+    short_defcon = defcon.replace("STANDBY", "SBY").replace("DEFCON", "D")
+    combo = f"{clock}  {short_defcon}"
+    if len(combo) <= width:
+        return center(combo, width)
+    return dashboard_header(snapshot, mode, now, tick, width)
+
+
+def lcd_frame_zones(frame_h: int) -> dict[str, int]:
+    """Return absolute row indices for each dashboard zone."""
+    input_row = max(8, frame_h - 1)
+    events_min = max(4, min(LCD_EVENTS_MIN_ROWS, input_row - 16))
+    row = 0
+    header_start = row
+    row += LCD_HEADER_ROWS
+    mode_bar = row
+    row += LCD_MODE_BAR_ROWS
+    art_start = row
+    row += LCD_ART_ROWS
+    panel_start = row
+    row += LCD_PANEL_MAX_ROWS
+    calendar_row = row
+    row += 1
+    status_row = row
+    row += 1
+    events_hdr = row
+    row += LCD_EVENTS_HEADER_ROWS
+    events_start = row
+    events_end = input_row
+    if events_end - events_start < events_min:
+        panel_start = max(art_start + LCD_ART_ROWS, panel_start - (events_min - (events_end - events_start)))
+    return {
+        "input_row": input_row,
+        "header_start": header_start,
+        "mode_bar": mode_bar,
+        "art_start": art_start,
+        "panel_start": panel_start,
+        "calendar_row": calendar_row,
+        "status_row": status_row,
+        "events_hdr": events_hdr,
+        "events_start": events_start,
+        "events_end": events_end,
+    }
+
+
+def mode_art_compact(mode: str, now: float, width: int = WIDTH, max_rows: int = LCD_ART_ROWS) -> list[str]:
+    return mode_art(mode, now, width)[: max(1, max_rows)]
 
 
 def metric_pair(
@@ -1960,7 +2030,7 @@ def event_segments(
             body = f"{nick} {event.kind}".strip()
     else:
         if nick:
-            segments.append((" " + nick[:10] + ": ", event_nick_style(event)))
+            segments.append((" " + nick[:8] + ": ", event_nick_style(event)))
         msg_style = "IRC_MSG"
 
     prefix = "".join(text for text, _style in segments)
@@ -2086,26 +2156,30 @@ def panel_lines(
     now: float | None = None,
     call_exts: set[str] | None = None,
     sip_flash: Any | None = None,
+    max_rows: int | None = None,
 ) -> list[tuple[DetailRow, str]]:
     status = snapshot.get("status") or {}
     bridge = snapshot.get("bridge") or {}
-    events: list[LcdEvent] = snapshot.get("events") or []
     ts = time.time() if now is None else now
     if mode == "terrarium":
-        return terrarium_panel(status, snapshot, width, now=ts)
-    if mode == "uptime":
-        return uptime_panel(status, snapshot, width, now=ts)
-    if mode == "ops":
-        return ops_panel(status, snapshot, width, now=ts)
-    if mode == "rpg":
-        return rpg_panel(bridge, width, now=ts)
-    if mode == "rgb":
-        return rgb_battle_panel(snapshot, width, now=ts)
-    if mode == "agents":
-        return agents_panel(bridge, status, width, now=ts, call_exts=call_exts, sip_flash=sip_flash)
-    if mode == "bridge":
-        return bridge_panel(bridge, width, now=ts)
-    return bridge_panel(bridge, width, now=ts)
+        rows = terrarium_panel(status, snapshot, width, now=ts)
+    elif mode == "uptime":
+        rows = uptime_panel(status, snapshot, width, now=ts)
+    elif mode == "ops":
+        rows = ops_panel(status, snapshot, width, now=ts)
+    elif mode == "rpg":
+        rows = rpg_panel(bridge, width, now=ts)
+    elif mode == "rgb":
+        rows = rgb_battle_panel(snapshot, width, now=ts)
+    elif mode == "agents":
+        rows = agents_panel(bridge, status, width, now=ts, call_exts=call_exts, sip_flash=sip_flash)
+    elif mode == "bridge":
+        rows = bridge_panel(bridge, width, now=ts)
+    else:
+        rows = bridge_panel(bridge, width, now=ts)
+    if max_rows is not None:
+        return rows[: max(1, max_rows)]
+    return rows
 
 
 def terrarium_panel(
@@ -2376,92 +2450,9 @@ def ops_panel(
     width: int,
     now: float | None = None,
 ) -> list[tuple[DetailRow, str]]:
-    noc = as_dict(status.get("noc"))
-    phones = as_dict(status.get("pbx_phones"))
-    phone_rows = []
-    for phone in phones.get("phones", []) if isinstance(phones, dict) else []:
-        if isinstance(phone, dict):
-            phone_rows.append(f"{phone.get('ext')} {phone.get('name') or phone.get('state')}")
-    celes = as_dict(snapshot.get("celes"))
-    heartbeat = as_dict(status.get("lcd_heartbeat"))
-    telemetry = as_dict(status.get("telemetry"))
-    local = as_dict(telemetry.get("local"))
-    remote = as_dict(telemetry.get("remote"))
-    remote_hosts = as_dict(remote.get("hosts"))
+    """NOC slide — colored HOST TABLE with ping bars (primary mesh view)."""
     ts = time.time() if now is None else now
-    ops_key_w = OPS_DETAIL_KEY_W
-    detail_room = kv_value_room(width, ops_key_w)
-    rows: list[tuple[DetailRow, str]] = [
-        (detail_kv_header(width, ops_key_w), "CYAN"),
-        (detail_kv_rule(width, ops_key_w), "SYS"),
-        (
-            detail_kv(
-                "MESH HOSTS",
-                noc_mesh_dns_line(noc, status),
-                width,
-                now=ts,
-                key_w=ops_key_w,
-            ),
-            "NOC",
-        ),
-        (
-            detail_kv(
-                "SERVICES",
-                " ".join(
-                    [
-                        f"VEC {'OK' if status.get('vector_ok') else 'DN'}",
-                        f"HERMES {'OK' if status.get('hermes_ok') else 'DN'}",
-                        f"PBX {'OK' if status.get('pbx_api_ok') else 'DN'}",
-                        f"API9104 {'OK' if status.get('ce_api_ok') else 'DN'}",
-                        f"CELES {'FRESH' if celes.get('fresh') else 'STALE'}",
-                        f"LCD HB {heartbeat.get('age_sec', '?')}s",
-                        f"PHONES {' | '.join(phone_rows[:3]) if phone_rows else 'none'}",
-                    ]
-                ),
-                width,
-                now=ts,
-                key_w=ops_key_w,
-            ),
-            "NOC",
-        ),
-        (
-            detail_kv(
-                "J124 WOPR",
-                joshua_defcon_ticker(),
-                width,
-                now=ts,
-                key_w=ops_key_w,
-            ),
-            "PBX",
-        ),
-    ]
-    for label, host, disk_path in (
-        ("ZEA", local, "/"),
-        ("ZTW", as_dict(remote_hosts.get("zealtower")), "/mnt/cache"),
-        ("VEC", as_dict(remote_hosts.get("vector")), "C:/"),
-    ):
-        if not host:
-            rows.append(
-                (
-                    detail_kv(
-                        f"DISK {label}",
-                        "telemetry waiting",
-                        width,
-                        key_w=ops_key_w,
-                        fill=True,
-                    ),
-                    "SYS",
-                )
-            )
-            continue
-        pct = first_disk_pct(host, disk_path) or first_disk_pct(host)
-        rows.append(
-            (
-                ops_disk_detail_segments(label, pct, width, key_w=ops_key_w),
-                host_label_style(label),
-            )
-        )
-    return rows[:7]
+    return mesh_table_rows(status, snapshot, width, now=ts)[:7]
 
 
 def rpg_panel(bridge: dict[str, Any], width: int, now: float | None = None) -> list[tuple[str, str]]:
@@ -2604,7 +2595,6 @@ def agents_panel(
             now=ts,
         ):
             rows.append((segments, row_style))
-        return rows
     return rows[:7]
 
 
