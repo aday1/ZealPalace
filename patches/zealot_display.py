@@ -18,6 +18,7 @@ from zealot_lcd_render import (
     HEIGHT,
     WIDTH,
     banner_text,
+    calendar_line,
     chunky_scroller,
     comet_line,
     demoscene_greetz,
@@ -286,6 +287,8 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, sip_flash=None) -> 
         add_line(stdscr, row, transition_text(text, now, idx, WIDTH), style, bold=(idx == 0), raw=True, now=now)
         row += 1
 
+    add_line(stdscr, row, calendar_line(now, WIDTH), "SYS", raw=True, now=now)
+    row += 1
     add_line(stdscr, row, motivational_line(snapshot, now, WIDTH), "MOTIVE", raw=True, now=now)
     row += 1
     add_line(stdscr, row, marquee(banner_text(snapshot), WIDTH, 10, now), "BANNER", bold=True, now=now)

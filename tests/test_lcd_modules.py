@@ -1,13 +1,20 @@
+import json
+import tempfile
 import unittest
+from datetime import datetime
+from pathlib import Path
 
+import zealot_sip_flash
 from zealot_lcd_feeds import LcdEvent, dedupe_events, parse_local_line
 from zealot_lcd_render import (
     WIDTH,
     bar,
+    calendar_line,
     chunky_scroller,
     comet_line,
     demoscene_greetz,
     event_lines,
+    fmt_duration_short,
     fmt_uptime,
     gpu_summary,
     mode_art,
@@ -19,6 +26,7 @@ from zealot_lcd_render import (
     sparkle_line,
     tunnel_line,
 )
+from zealot_sip_flash import SipCallFlash
 
 
 class LcdFeedTests(unittest.TestCase):
@@ -129,6 +137,51 @@ class LcdRenderTests(unittest.TestCase):
         self.assertEqual(fmt_uptime(90061), "1d01h")
         self.assertTrue(any("ztwr up 14d03h" in row for row, _style in rows))
         self.assertTrue(all(len(row) <= WIDTH for row, _style in rows))
+
+    def test_calendar_line_includes_week_countdowns(self):
+        now = datetime(2026, 6, 16, 12, 0).timestamp()
+        row = calendar_line(now, WIDTH)
+        self.assertEqual(len(row), WIDTH)
+        self.assertIn("Jun", row)
+        self.assertIn("W25/52", row)
+        self.assertIn("Y-27w", row)
+        self.assertIn("WK", row)
+        self.assertIn("WB", row)
+        self.assertEqual(fmt_duration_short(5 * 86400 + 3 * 3600), "5d03h")
+
+
+class SipFlashTests(unittest.TestCase):
+    def test_sip_overlay_hidden_without_active_lines(self):
+        original = zealot_sip_flash.SIP_FLASH
+        with tempfile.TemporaryDirectory() as tmp:
+            zealot_sip_flash.SIP_FLASH = Path(tmp) / "sip_call_flash.json"
+            try:
+                zealot_sip_flash.SIP_FLASH.write_text(
+                    json.dumps({"state": "talking", "active_lines": 0, "duration": 30}),
+                    encoding="utf-8",
+                )
+                flash = SipCallFlash(lambda text, fonts=None: [text])
+                flash.poll_file()
+                self.assertFalse(flash.active())
+                self.assertEqual(flash.header_title(), "")
+            finally:
+                zealot_sip_flash.SIP_FLASH = original
+
+    def test_sip_overlay_shows_for_active_call(self):
+        original = zealot_sip_flash.SIP_FLASH
+        with tempfile.TemporaryDirectory() as tmp:
+            zealot_sip_flash.SIP_FLASH = Path(tmp) / "sip_call_flash.json"
+            try:
+                zealot_sip_flash.SIP_FLASH.write_text(
+                    json.dumps({"state": "talking", "active_lines": 1, "duration": 30}),
+                    encoding="utf-8",
+                )
+                flash = SipCallFlash(lambda text, fonts=None: [text])
+                flash.poll_file()
+                self.assertTrue(flash.active())
+                self.assertEqual(flash.header_title(), "PBX LINE ACTIVE")
+            finally:
+                zealot_sip_flash.SIP_FLASH = original
 
 
 if __name__ == "__main__":

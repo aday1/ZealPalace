@@ -6,6 +6,7 @@ import re
 import textwrap
 import time
 import zlib
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from zealot_lcd_feeds import LcdEvent, short_text
 
 WIDTH = 40
 HEIGHT = 34
+MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
 def fit(text: Any, width: int = WIDTH) -> str:
@@ -32,6 +34,35 @@ def pad(text: Any, width: int = WIDTH) -> str:
 
 def center(text: Any, width: int = WIDTH) -> str:
     return fit(str(text or "")[:width].center(width), width)
+
+
+def fmt_duration_short(seconds: Any) -> str:
+    try:
+        value = max(0, int(float(seconds)))
+    except (TypeError, ValueError):
+        return "?"
+    days, rem = divmod(value, 86400)
+    hours = rem // 3600
+    minutes = (rem % 3600) // 60
+    if days:
+        return f"{days}d{hours:02d}h"
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    return f"{minutes}m"
+
+
+def calendar_line(now: float | None = None, width: int = WIDTH) -> str:
+    ts = time.time() if now is None else now
+    dt = datetime.fromtimestamp(ts)
+    month = MONTH_NAMES[max(0, min(11, dt.month - 1))]
+    iso_week = max(1, min(52, int(dt.isocalendar().week)))
+    weeks_left = max(0, 52 - iso_week)
+    week_start = (dt - timedelta(days=dt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    next_week = week_start + timedelta(days=7)
+    seconds_left = max(0, int((next_week - dt).total_seconds()))
+    weekbeats_left = max(0, min(9999, int(round(seconds_left / (7 * 86400) * 10000))))
+    text = f"{dt:%a} {dt.day:02d} {month} W{iso_week:02d}/52 Y-{weeks_left:02d}w WK{fmt_duration_short(seconds_left)} WB{weekbeats_left:04d}"
+    return fit(text, width)
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -680,6 +711,7 @@ def render_text_frame(snapshot: dict[str, Any], now: float | None = None) -> lis
     rows.append(chunky_scroller(ticker_text(snapshot) + " // " + gpu_summary(snapshot), ts, WIDTH, speed=3.0))
     rows.extend(mode_art(mode, ts, WIDTH))
     rows.extend(transition_text(line, ts, idx, WIDTH) for idx, (line, _style) in enumerate(panel_lines(snapshot, mode, WIDTH)))
+    rows.append(calendar_line(ts, WIDTH))
     rows.append(motivational_line(snapshot, ts, WIDTH))
     rows.append(marquee(banner_text(snapshot), WIDTH, 10, ts))
     rows.append(tunnel_line(ts, WIDTH))

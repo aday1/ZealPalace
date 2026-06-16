@@ -7,6 +7,8 @@ from pathlib import Path
 
 SIP_FLASH = Path.home() / '.cache' / 'zealot' / 'sip_call_flash.json'
 SIP_EVENT_MAX_AGE_SEC = 15 * 60
+ACTIVE_CALL_STATES = ('ring', 'ringing', 'incoming', 'outgoing', 'dialing', 'calling', 'talking', 'connected', 'answered', 'active', 'inuse', 'up')
+CLEAR_CALL_STATES = ('', 'clear', 'idle', 'hangup', 'hangup_complete', 'ended', 'complete', 'closed', 'none')
 
 
 def _parse_ts(value):
@@ -16,6 +18,10 @@ def _parse_ts(value):
         return datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
     except ValueError:
         return 0.0
+
+
+def _state_can_overlay(state):
+    return state in ACTIVE_CALL_STATES
 
 
 class SipCallFlash:
@@ -34,6 +40,9 @@ class SipCallFlash:
 
     def clear(self):
         self.active_state = ''
+        self.headline = ''
+        self.subline = ''
+        self.detail = ''
         self.duration = 0.0
         self.active_lines = 0
 
@@ -47,6 +56,10 @@ class SipCallFlash:
 
     def active(self):
         if not self.active_state:
+            return False
+        if self.active_lines <= 0:
+            return False
+        if not _state_can_overlay(self.active_state):
             return False
         if self.duration <= 0:
             return True
@@ -69,7 +82,7 @@ class SipCallFlash:
         except (OSError, json.JSONDecodeError, ValueError):
             return
         state = str(data.get('state') or '').lower()
-        if state in ('', 'clear', 'idle', 'hangup', 'ended'):
+        if state in CLEAR_CALL_STATES:
             self.clear()
             return
         event_ts = _parse_ts(data.get('ts'))
@@ -85,10 +98,18 @@ class SipCallFlash:
         sub = f'{from_name} ({from_ext})'
         det = f'{to_name} ({to_ext})'
         dur = float(data.get('duration', 30))
-        try:
-            self.active_lines = max(0, int(data.get('active_lines', 0)))
-        except (TypeError, ValueError):
-            self.active_lines = 1 if state in ('ring', 'incoming', 'talking') else 0
+        raw_lines = data.get('active_lines')
+        if raw_lines in (None, ''):
+            active_lines = 1 if _state_can_overlay(state) else 0
+        else:
+            try:
+                active_lines = max(0, int(raw_lines))
+            except (TypeError, ValueError):
+                active_lines = 1 if _state_can_overlay(state) else 0
+        if active_lines <= 0 or not _state_can_overlay(state):
+            self.clear()
+            return
+        self.active_lines = active_lines
         if str(data.get('headline') or '').upper().startswith('PBX'):
             headline = str(data.get('headline') or 'PBX ACTIVE')[:20]
         self.trigger(headline, sub, det, state, duration=dur)
