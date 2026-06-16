@@ -869,6 +869,7 @@ def status_files() -> dict[str, Any]:
         "noc": read_json(CACHE / "noc_mesh.json", {}),
         "pbx_phones": read_json(CACHE / "pbx_phones.json", {}),
         "navi": read_json(CACHE / "navi_ticker.json", {}),
+        "agent_tickers": read_json(CACHE / "agent_tickers.json", {}),
         "lcd_heartbeat": read_heartbeat(),
         "telemetry": telemetry,
         "vector_ok": tcp_ok("10.13.37.60", 11434),

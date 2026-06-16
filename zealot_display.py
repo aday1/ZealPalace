@@ -19,6 +19,7 @@ from zealot_lcd_render import (
     WIDTH,
     LCD_PANEL_MAX_ROWS,
     SCROLLER_SPEED,
+    TICKER_SCROLLER_SPEED,
     compact_status_line,
     lcd_frame_cols,
     lcd_frame_zones,
@@ -32,6 +33,7 @@ from zealot_lcd_render import (
     gpu_summary,
     header_title,
     lcd_status_line,
+    agents_art_live,
     mode_art_compact,
     mode_name,
     mode_section_bar,
@@ -450,10 +452,10 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         stdscr,
         zones["header_start"] + 2,
         chunky_scroller(
-            ticker_text(snapshot) + " // " + gpu_summary(snapshot),
+            ticker_text(snapshot) + " · " + gpu_summary(snapshot),
             anim_now(now),
             frame_w,
-            speed=SCROLLER_SPEED,
+            speed=TICKER_SCROLLER_SPEED,
         ),
         "NOC",
         bold=True,
@@ -465,7 +467,11 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     add_line(stdscr, zones["mode_bar"], mode_section_bar(mode, frame_w, now), "CYAN", bold=True, raw=True, now=now)
 
     # --- Compact centered ASCII art (2 rows) ---
-    for offset, art_row in enumerate(mode_art_compact(panel_mode, now, frame_w)):
+    if panel_mode == "agents":
+        art_rows = agents_art_live(snapshot, frame_w)
+    else:
+        art_rows = mode_art_compact(panel_mode, now, frame_w)
+    for offset, art_row in enumerate(art_rows):
         add_line(stdscr, zones["art_start"] + offset, art_row, "ART", raw=True, now=now)
 
     # --- Panel zone (fixed 7 rows): NOC HOST TABLE / agents+transcript / etc. ---

@@ -81,6 +81,8 @@ METRIC_CYCLE: tuple[tuple[str, str, str], ...] = (
 ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
+TICKER_SCROLLER_SPEED = 0.58
+LCD_TICKER_VERSION = "tkr0617b"
 RASTER_SPEED = 0.35
 TUNNEL_SPEED = 0.2
 COMET_SPEED = 1.5
@@ -1032,8 +1034,25 @@ def lcd_frame_zones(frame_h: int) -> dict[str, int]:
     }
 
 
+MODE_ART_PICK: dict[str, tuple[int, ...]] = {
+    "terrarium": (1, 2),
+    "ops": (1, 2),
+    "uptime": (1, 2),
+    "rpg": (1, 2),
+    "rgb": (1, 2),
+    "agents": (1, 2),
+    "bridge": (0, 1),
+    "lounge": (1, 2),
+}
+
+
 def mode_art_compact(mode: str, now: float, width: int = WIDTH, max_rows: int = LCD_ART_ROWS) -> list[str]:
-    return mode_art(mode, now, width)[: max(1, max_rows)]
+    rows = mode_art(mode, now, width)
+    picks = MODE_ART_PICK.get(mode, tuple(range(max_rows)))
+    picked = [rows[i] for i in picks if 0 <= i < len(rows)]
+    if not picked:
+        picked = rows[: max(1, max_rows)]
+    return picked[: max(1, max_rows)]
 
 
 def metric_pair(
@@ -1731,10 +1750,10 @@ MODE_ART: dict[str, tuple[str, ...]] = {
         "+--- CGA palette ---+",
     ),
     "agents": (
-        "111-117-128-129 PBX",
-        " \\__ LAN BUS /__/   ",
-        "690-CRYSTAL MESH-698",
-        " agents in-band talk ",
+        "  PBX BUS 111-117-122 ",
+        " \\__ LAN BUS /__/     ",
+        " 123-SIMON 130-LAWYER ",
+        " agents in-band talk  ",
     ),
     "bridge": (
         "SillyTavern<=>ZealPalace",
@@ -2115,25 +2134,75 @@ def header_title(snapshot: dict[str, Any], mode: str, width: int = WIDTH) -> str
     return center(f"ZEALTREE {label} {'/'.join(badges)}", width)
 
 
+def pbx_phone_summary_map(status: dict[str, Any]) -> dict[str, str]:
+    phones = as_dict(status.get("pbx_phones"))
+    out: dict[str, str] = {}
+    for row in phones.get("phones") or []:
+        if not isinstance(row, dict):
+            continue
+        ext = str(row.get("ext") or "").strip()
+        summary = str(row.get("last_call_summary") or "").strip()
+        if ext and summary:
+            out[ext] = summary
+    return out
+
+
+def agent_ticker_bits(status: dict[str, Any]) -> list[str]:
+    """Call-summary one-liners for Navi, Simon, Lawyer (pushed from CELES)."""
+    bits: list[str] = []
+    agent_tickers = as_dict(status.get("agent_tickers"))
+    agents = agent_tickers.get("agents") if isinstance(agent_tickers.get("agents"), dict) else {}
+    phone_summaries = pbx_phone_summary_map(status)
+    navi = as_dict(status.get("navi"))
+    navi_line = str(navi.get("ticker") or "").strip()
+    for ext, label in (("122", "NAVI"), ("123", "SIMON"), ("130", "LAWYER")):
+        block = agents.get(ext) if isinstance(agents, dict) else None
+        summary = ""
+        if isinstance(block, dict):
+            summary = str(block.get("summary") or "").strip()
+        if not summary and ext == "122" and navi_line:
+            summary = navi_line
+        if not summary:
+            summary = phone_summaries.get(ext, "")
+        if summary:
+            bits.append(f"{label} {short_text(summary, 56)}")
+    return bits
+
+
+def lan_bus_status_line(status: dict[str, Any], width: int = WIDTH) -> str:
+    states = pbx_phone_state_map(status)
+    bits: list[str] = []
+    for ext, tag in (("111", "HER"), ("117", "HOL"), ("122", "NAV"), ("123", "SIM"), ("130", "LAW")):
+        raw = states.get(ext, "?")
+        st = raw[:4] if raw else "?"
+        bits.append(f"{tag}:{st}")
+    vec = "VEC+" if status.get("vector_ok") else "VEC-"
+    pbx = "PBX+" if status.get("pbx_api_ok") else "PBX-"
+    return fit(f"LAN BUS {' '.join(bits)} {vec} {pbx}", width)
+
+
+def agents_art_live(snapshot: dict[str, Any], width: int = WIDTH) -> list[str]:
+    """PBX agents slide: decorative LAN BUS label then live mesh strip directly below."""
+    status = snapshot.get("status") or {}
+    return [
+        center(" \\__ LAN BUS /__/     ", width),
+        lan_bus_status_line(status, width),
+    ]
+
+
 def ticker_text(snapshot: dict[str, Any]) -> str:
     status = snapshot.get("status") or {}
     bridge = snapshot.get("bridge") or {}
-    bits = [
-        "ZealPalace hybrid ticker",
-        f"mode co-canon",
-        f"zone {bridge.get('hot_zone') or '?'}",
+    bits: list[str] = [
+        f"tkr {LCD_TICKER_VERSION}",
+        "VEC " + ("OK" if status.get("vector_ok") else "DOWN"),
+        "PBX " + ("OK" if status.get("pbx_api_ok") else "DOWN"),
+        f"zone {short_text(bridge.get('hot_zone') or '?', 14)}",
         f"npc {bridge.get('npc_count', 0)}",
-        f"players {bridge.get('players_total', 0)}",
-        f"gm {len(bridge.get('gm_pending') or [])}",
-        "VEC " + ("OK" if status.get("vector_ok") else "NO"),
-        "PBX " + ("OK" if status.get("pbx_api_ok") else "NO"),
     ]
-    navi = status.get("navi") or {}
-    navi_line = navi.get("ticker") if isinstance(navi, dict) else ""
-    if navi_line:
-        bits.append("NAVI " + short_text(navi_line, 120))
-    bits.append(joshua_defcon_ticker())
-    return "  >  ".join(bits)
+    bits.extend(agent_ticker_bits(status))
+    bits.append(short_text(joshua_defcon_ticker(), 42))
+    return " · ".join(bit for bit in bits if bit)
 
 
 def banner_text(snapshot: dict[str, Any]) -> str:
@@ -2561,10 +2630,13 @@ def agents_panel(
         ts,
         active_exts,
     )
-    rows: list[tuple[str, str]] = [
-        (agent_table_header(width), "CYAN"),
-        (agent_table_rule(width), "SYS"),
-    ]
+    rows: list[tuple[str, str]] = []
+    rows.extend(
+        [
+            (agent_table_header(width), "CYAN"),
+            (agent_table_rule(width), "SYS"),
+        ]
+    )
     for ext, name in visible:
         last_text, style = agent_last_label(
             ext, phone_states, active_exts, call_ts_map, ts, seen_ts_map

@@ -17,8 +17,13 @@ from zealot_lcd_render import (
     agents_panel,
     detail_kv,
     host_long_name,
+    LCD_TICKER_VERSION,
+    agent_ticker_bits,
+    agents_art_live,
     dashboard_header,
+    lan_bus_status_line,
     mode_section_bar,
+    ticker_text,
     panel_section_label,
     mode_seconds_left,
     noc_mesh_dns_line,
@@ -289,6 +294,67 @@ class ModeBarTests(unittest.TestCase):
     def test_panel_section_label_differs_from_mode_title(self):
         self.assertEqual(panel_section_label("terrarium"), "LAN VITALS")
         self.assertEqual(panel_section_label("lounge"), "LIVE CHATTER")
+
+
+class TickerTests(unittest.TestCase):
+    def test_ticker_includes_version_and_agent_summaries(self):
+        snapshot = {
+            "status": {
+                "vector_ok": True,
+                "pbx_api_ok": True,
+                "agent_tickers": {
+                    "agents": {
+                        "122": {"summary": "mesh quiet"},
+                        "123": {"summary": "ticket open"},
+                        "130": {"summary": "retainer billed"},
+                    }
+                },
+                "pbx_phones": {"phones": []},
+                "navi": {},
+            },
+            "bridge": {},
+        }
+        row = ticker_text(snapshot)
+        self.assertIn(LCD_TICKER_VERSION, row)
+        self.assertIn("NAVI", row)
+        self.assertIn("SIMON", row)
+        self.assertIn("LAWYER", row)
+        self.assertLessEqual(len(row.split(" · ")[0]), 20)
+
+    def test_lan_bus_line_fits_width(self):
+        status = {
+            "pbx_phones": {
+                "phones": [
+                    {"ext": "122", "state": "connected"},
+                    {"ext": "123", "state": "idle"},
+                ]
+            },
+            "vector_ok": True,
+            "pbx_api_ok": False,
+        }
+        row = lan_bus_status_line(status, WIDTH)
+        self.assertEqual(len(row), WIDTH)
+        self.assertIn("LAN BUS", row)
+        self.assertIn("NAV:", row)
+
+    def test_agents_art_puts_status_under_lan_bus_label(self):
+        snapshot = {
+            "status": {
+                "pbx_phones": {
+                    "phones": [
+                        {"ext": "122", "state": "service"},
+                        {"ext": "123", "state": "service"},
+                        {"ext": "130", "state": "idle"},
+                    ]
+                },
+                "vector_ok": True,
+                "pbx_api_ok": True,
+            }
+        }
+        rows = agents_art_live(snapshot, WIDTH)
+        self.assertEqual(len(rows), 2)
+        self.assertIn("LAN BUS", rows[0])
+        self.assertIn("NAV:serv", rows[1])
 
 
 class DetailScrollTests(unittest.TestCase):
