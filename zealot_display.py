@@ -25,6 +25,8 @@ from zealot_lcd_render import (
     calendar_line,
     chunky_scroller,
     comet_line,
+    dashboard_header,
+    defcon_status_line,
     demoscene_greetz,
     event_segments,
     fit,
@@ -430,12 +432,21 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     set_tmux_bar(snapshot=snapshot, mode=mode)
     call_exts = set(getattr(sip_flash, "active_exts", set()) or ()) if sip_flash is not None else set()
     panel_mode = "agents" if sip_active else mode
-    add_line(stdscr, 0, comet_line(header_title(snapshot, mode).strip(), now), "GLINT", raw=True, now=now)
-    add_line(stdscr, 1, static_rule(frame_w), "RASTER", raw=True, now=now)
-    add_line(stdscr, 2, demoscene_greetz(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
+    add_line(stdscr, 0, comet_line(header_title(snapshot, panel_mode).strip(), now), "GLINT", raw=True, now=now)
     add_line(
         stdscr,
-        3,
+        1,
+        dashboard_header(snapshot, panel_mode, now, tick, frame_w),
+        "SYS",
+        bold=True,
+        raw=True,
+        now=now,
+    )
+    add_line(stdscr, 2, defcon_status_line(frame_w), "PBX_CALL", bold=True, raw=True, now=now)
+    add_line(stdscr, 3, demoscene_greetz(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
+    add_line(
+        stdscr,
+        4,
         chunky_scroller(
             ticker_text(snapshot) + " // " + gpu_summary(snapshot),
             anim_now(now),
@@ -448,7 +459,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         now=now,
     )
 
-    row = 4
+    row = 5
     for art_row in mode_art(panel_mode, now, frame_w):
         add_line(stdscr, row, art_row, "ART", raw=True, now=now)
         row += 1

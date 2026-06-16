@@ -268,6 +268,16 @@ class ModeBarTests(unittest.TestCase):
         self.assertTrue(row.startswith(" "))
         self.assertTrue(row.endswith(" "))
 
+    def test_mode_art_is_center_aligned(self):
+        rows = mode_art("ops", now=1000.0, width=WIDTH)
+        self.assertTrue(rows)
+        core = rows[0].strip()
+        self.assertIn("NOC BUS", core)
+        left_pad = len(rows[0]) - len(rows[0].lstrip(" "))
+        right_pad = len(rows[0]) - len(rows[0].rstrip(" "))
+        self.assertGreaterEqual(left_pad, 1)
+        self.assertGreaterEqual(right_pad, 1)
+
     def test_dashboard_footer_omits_week_and_tick(self):
         snapshot = {"status": {"telemetry": {"local": {}}}}
         footer = dashboard_footer(snapshot, now=1_700_000_000.0, tick=42, width=WIDTH)

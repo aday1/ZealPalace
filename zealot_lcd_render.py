@@ -961,6 +961,11 @@ def dashboard_header(snapshot: dict[str, Any], mode: str, now: float, tick: int,
     return center(text, width)
 
 
+def defcon_status_line(width: int = WIDTH) -> str:
+    """Centered Joshua WOPR / DEFCON strip for the hybrid dashboard header."""
+    return center(joshua_defcon_ticker(), width)
+
+
 def metric_pair(
     left_label: str,
     left_val: Any,
@@ -1706,9 +1711,16 @@ def mode_art(mode: str, now: float, width: int = WIDTH) -> list[str]:
     else:
         rows = list(MODE_ART.get(mode, MODE_ART["lounge"]))
     glint = "<>" if int(anim_now(now, 8.0) // 8) % 2 else "[]"
-    if rows:
-        rows[0] = glint[0] + rows[0][1 : max(1, width - 1)] + glint[1]
-    return [pad(row, width) for row in rows]
+    out: list[str] = []
+    for idx, row in enumerate(rows):
+        line = center(row, width)
+        if idx == 0 and len(line) >= 2:
+            chars = list(line)
+            chars[0] = glint[0]
+            chars[-1] = glint[1]
+            line = "".join(chars)
+        out.append(fit(line, width))
+    return out
 
 
 def transition_text(text: Any, now: float, row: int, width: int = WIDTH, window: float = 2.25) -> str:
