@@ -204,6 +204,18 @@ def _net_counters() -> tuple[int, int]:
     return rx, tx
 
 
+def _uptime_sec(now: float) -> int:
+    if psutil is not None:
+        try:
+            return max(0, int(now - float(psutil.boot_time())))
+        except Exception:
+            pass
+    try:
+        return max(0, int(float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])))
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
 def local_system_stats() -> dict[str, Any]:
     now = time.time()
     if psutil is not None:
@@ -232,6 +244,7 @@ def local_system_stats() -> dict[str, Any]:
     return {
         "ok": True,
         "host": socket.gethostname(),
+        "uptime_sec": _uptime_sec(now),
         "cpu_pct": round(cpu_pct, 1),
         "load1": round(float(load[0]), 2),
         "load5": round(float(load[1]), 2),

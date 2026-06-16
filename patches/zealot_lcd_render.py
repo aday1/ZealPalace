@@ -149,6 +149,12 @@ MODE_ART: dict[str, tuple[str, ...]] = {
         "   / cpu mem disk gpu packets /     ",
         "  '-------------------------'       ",
     ),
+    "uptime": (
+        "      .---- BOOT AGE GRID ----.     ",
+        " zealp  | zealtower | vector  |     ",
+        " uptime | load      | service |     ",
+        "      '---- no reboot kabuki --'    ",
+    ),
     "rpg": (
         "        /\\      CRYSTAL MESH       ",
         "   /\\  /  \\ /\\   RPG CANON         ",
@@ -269,6 +275,31 @@ def fmt_bps(value: Any) -> str:
     return f"{n:.1f}{unit}"
 
 
+def fmt_uptime(value: Any) -> str:
+    try:
+        seconds = max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return "?"
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days >= 100:
+        return f"{days}d"
+    if days:
+        return f"{days}d{hours:02d}h"
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    return f"{minutes}m"
+
+
+def uptime_pct(value: Any, target_days: float = 30.0) -> float:
+    try:
+        seconds = max(0.0, float(value))
+    except (TypeError, ValueError):
+        return 0.0
+    return min(100.0, seconds / max(1.0, target_days * 86400.0) * 100.0)
+
+
 def first_disk_pct(host: dict[str, Any], path: str = "/") -> Any:
     disks = host.get("disks") or []
     if isinstance(disks, list):
@@ -338,7 +369,7 @@ def newest(events: list[LcdEvent], source: str | None = None, n: int = 3) -> lis
     return sorted(rows, key=lambda event: event.sort_ts)[-n:]
 
 
-def mode_name(now: float, modes: tuple[str, ...] = ("terrarium", "ops", "rpg", "agents", "bridge", "lounge")) -> str:
+def mode_name(now: float, modes: tuple[str, ...] = ("terrarium", "uptime", "ops", "rpg", "agents", "bridge", "lounge")) -> str:
     return modes[int(now // 6) % len(modes)]
 
 
@@ -401,6 +432,8 @@ def panel_lines(snapshot: dict[str, Any], mode: str, width: int = WIDTH) -> list
     events: list[LcdEvent] = snapshot.get("events") or []
     if mode == "terrarium":
         return terrarium_panel(status, snapshot, width)
+    if mode == "uptime":
+        return uptime_panel(status, width)
     if mode == "ops":
         return ops_panel(status, snapshot, width)
     if mode == "rpg":
@@ -461,6 +494,60 @@ def terrarium_panel(status: dict[str, Any], snapshot: dict[str, Any], width: int
     age = remote.get("age_sec")
     if age is not None:
         rows.append((fit(f"remote telemetry age {age}s {'fresh' if remote.get('fresh') else 'stale'}", width), "SYS"))
+    return rows[:9]
+
+
+def uptime_panel(status: dict[str, Any], width: int) -> list[tuple[str, str]]:
+    telemetry = as_dict(status.get("telemetry"))
+    local = as_dict(telemetry.get("local"))
+    remote = as_dict(telemetry.get("remote"))
+    remote_hosts = as_dict(remote.get("hosts"))
+    host_specs = (
+        ("zealp", local, "NOC", "/"),
+        ("ztwr", as_dict(remote_hosts.get("zealtower")), "ST", "/mnt/cache"),
+        ("vect", as_dict(remote_hosts.get("vector")), "RPG", "/mnt/c"),
+    )
+
+    rows: list[tuple[str, str]] = [(fit("SERVER UPTIME / BOOT AGE", width), "NOC")]
+    longest_label = "?"
+    longest_uptime = -1
+    for label, host, style, disk_path in host_specs:
+        if not host:
+            rows.append((fit(f"{label} telemetry waiting", width), "SYS"))
+            rows.append((fit(f"{label} no uptime sample yet", width), "SYS"))
+            continue
+        uptime = host.get("uptime_sec")
+        try:
+            uptime_value = int(float(uptime))
+        except (TypeError, ValueError):
+            uptime_value = -1
+        if uptime_value > longest_uptime:
+            longest_label = label
+            longest_uptime = uptime_value
+        disk_pct = first_disk_pct(host, disk_path)
+        if disk_pct is None:
+            disk_pct = first_disk_pct(host)
+        rows.append(
+            (
+                fit(f"{label} up {fmt_uptime(uptime)} {bar(uptime_pct(uptime), 8)} cpu {fmt_pct(host.get('cpu_pct'))}", width),
+                style,
+            )
+        )
+        rows.append(
+            (
+                fit(
+                    f"{label} load {host.get('load1', '?')}/{host.get('load5', '?')} mem {fmt_pct(host.get('mem_pct'))} disk {fmt_pct(disk_pct)}",
+                    width,
+                ),
+                style,
+            )
+        )
+
+    age = remote.get("age_sec")
+    freshness = f"remote age {age}s {'fresh' if remote.get('fresh') else 'stale'}" if age is not None else "remote age unknown"
+    if longest_uptime >= 0:
+        freshness += f" longest {longest_label} {fmt_uptime(longest_uptime)}"
+    rows.append((fit(freshness, width), "SYS"))
     return rows[:9]
 
 

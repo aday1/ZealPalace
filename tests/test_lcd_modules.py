@@ -8,9 +8,11 @@ from zealot_lcd_render import (
     comet_line,
     demoscene_greetz,
     event_lines,
+    fmt_uptime,
     gpu_summary,
     mode_art,
     motivational_line,
+    panel_lines,
     raster_bar,
     render_text_frame,
     spark,
@@ -58,7 +60,7 @@ class LcdRenderTests(unittest.TestCase):
     def test_flourish_lines_fit_width(self):
         self.assertEqual(len(comet_line("ZEAL", now=1, width=WIDTH)), WIDTH)
         self.assertEqual(len(sparkle_line(now=1, width=WIDTH)), WIDTH)
-        for mode in ("terrarium", "ops", "rpg", "agents", "bridge", "lounge"):
+        for mode in ("terrarium", "uptime", "ops", "rpg", "agents", "bridge", "lounge"):
             for row in mode_art(mode, now=1, width=WIDTH):
                 self.assertEqual(len(row), WIDTH)
 
@@ -85,6 +87,48 @@ class LcdRenderTests(unittest.TestCase):
         self.assertEqual(len(tunnel_line(now=1, width=WIDTH)), WIDTH)
         self.assertEqual(len(demoscene_greetz(snapshot, now=1, width=WIDTH)), WIDTH)
         self.assertEqual(len(motivational_line(snapshot, now=1, width=WIDTH)), WIDTH)
+
+    def test_uptime_slide_fits_width(self):
+        snapshot = {
+            "status": {
+                "telemetry": {
+                    "local": {
+                        "uptime_sec": 3661,
+                        "cpu_pct": 12,
+                        "load1": 0.2,
+                        "load5": 0.3,
+                        "mem_pct": 36,
+                        "disks": [{"path": "/", "pct": 52}],
+                    },
+                    "remote": {
+                        "age_sec": 3,
+                        "fresh": True,
+                        "hosts": {
+                            "zealtower": {
+                                "uptime_sec": 14 * 86400 + 3 * 3600,
+                                "cpu_pct": 8,
+                                "load1": 0.1,
+                                "load5": 0.2,
+                                "mem_pct": 44,
+                                "disks": [{"path": "/mnt/cache", "pct": 89}],
+                            },
+                            "vector": {
+                                "uptime_sec": 3 * 86400 + 4 * 3600,
+                                "cpu_pct": 21,
+                                "load1": 1.1,
+                                "load5": 0.8,
+                                "mem_pct": 61,
+                                "disks": [{"path": "/mnt/c", "pct": 96}],
+                            },
+                        },
+                    },
+                }
+            }
+        }
+        rows = panel_lines(snapshot, "uptime", WIDTH)
+        self.assertEqual(fmt_uptime(90061), "1d01h")
+        self.assertTrue(any("ztwr up 14d03h" in row for row, _style in rows))
+        self.assertTrue(all(len(row) <= WIDTH for row, _style in rows))
 
 
 if __name__ == "__main__":
