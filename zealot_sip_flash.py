@@ -79,35 +79,102 @@ def _wrap_turn_line(prefix: str, text: str, width: int) -> list[str]:
     return lines
 
 
+def _turn_label_style(role: str) -> str:
+    return "GREEN" if role in ("user", "caller") else "MAG"
+
+
+def _trim_segments(segments: list[tuple[str, str]], width: int) -> list[tuple[str, str]]:
+    total = sum(len(text) for text, _style in segments)
+    if total <= width:
+        if total < width:
+            segments = [*segments, (" " * (width - total), "SYS")]
+        return segments
+    trim = total - width
+    last_text, last_style = segments[-1]
+    return [*segments[:-1], (last_text[: max(0, len(last_text) - trim)], last_style)]
+
+
+def transcript_turn_segment_lines(
+    turn: dict,
+    width: int,
+    now: float | None = None,
+) -> list[list[tuple[str, str]]]:
+    """Bracketed, color-ready segment rows for one transcript turn."""
+    width = max(16, int(width or 40))
+    role = str(turn.get("role") or "user").strip().lower()
+    label = str(turn.get("label") or ("YOU" if role in ("user", "caller") else "AGENT")).strip()
+    stamp = _short_ts(str(turn.get("ts") or ""))
+    label_disp = label[:8]
+    head = f"[{stamp}][{label_disp}] "
+    indent = " " * len(head)
+    body = re.sub(r"\s+", " ", str(turn.get("text") or "")).strip()
+    wrap_w = max(8, width - len(head))
+    chunks = textwrap.wrap(
+        body,
+        width=wrap_w,
+        break_long_words=True,
+        break_on_hyphens=False,
+    ) or [""]
+    msg_style = "IRC_MSG"
+    label_style = _turn_label_style(role)
+    rows: list[list[tuple[str, str]]] = []
+    for idx, chunk in enumerate(chunks):
+        if idx == 0:
+            segments: list[tuple[str, str]] = [
+                ("[", "SYS"),
+                (stamp, "CYAN"),
+                ("][", "SYS"),
+                (label_disp, label_style),
+                ("] ", "SYS"),
+                (chunk, msg_style),
+            ]
+        else:
+            segments = [(indent, "SYS"), (chunk, msg_style)]
+        rows.append(_trim_segments(segments, width))
+    return rows
+
+
+def transcript_panel_segment_rows(
+    turns: list[dict],
+    width: int,
+    max_rows: int,
+    now: float | None = None,
+) -> list[tuple[list[tuple[str, str]], str]]:
+    """Tail-pinned colorful transcript rows for the agents panel."""
+    if max_rows <= 0:
+        return []
+    width = max(16, int(width or 40))
+    rows: list[tuple[list[tuple[str, str]], str]] = []
+    for turn in turns:
+        for segments in transcript_turn_segment_lines(turn, width, now=now):
+            role = str(turn.get("role") or "user").strip().lower()
+            row_style = "PBX_CALL" if role in ("user", "caller") else "MAG"
+            rows.append((segments, row_style))
+    if not rows:
+        return [([(" [awaiting transcript...]", "SYS")], "SYS")]
+    if len(rows) <= max_rows:
+        return rows
+    return rows[-max_rows:]
+
+
 def transcript_display_lines(
     turns: list[dict],
     width: int,
     max_rows: int,
     now: float | None = None,
 ) -> list[tuple[str, str]]:
-    """Word-wrapped, timestamped transcript rows pinned to the latest content."""
+    """Flat text rows (tests/legacy) — bracketed labels, tail-pinned."""
     if max_rows <= 0:
         return []
     width = max(16, int(width or 40))
     rows: list[tuple[str, str]] = []
-    for turn in turns:
-        role = str(turn.get("role") or "user").strip().lower()
-        style = "user" if role in ("user", "caller") else "agent"
-        label = str(turn.get("label") or ("YOU" if style == "user" else "AGENT")).strip()
-        stamp = _short_ts(str(turn.get("ts") or ""))
-        prefix = f"{stamp} {label}: "
-        for line in _wrap_turn_line(prefix, str(turn.get("text") or ""), width):
-            rows.append((line[:width], style))
-
+    for segments, style in transcript_panel_segment_rows(turns, width, 999, now=now):
+        rows.append(("".join(text for text, _ in segments), style))
     if not rows:
-        return [("AWAITING TRANSCRIPT...", "dim")]
-
+        return [("[awaiting transcript...]", "dim")]
     if len(rows) <= max_rows:
         return rows
-
-    # Always follow the latest transcript lines (chat-style tail pin).
-    start = len(rows) - max_rows
-    return rows[start:]
+    return rows[-max_rows:]
 
 
 def _extract_active_exts(data: dict) -> set[str]:

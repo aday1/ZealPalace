@@ -17,13 +17,25 @@ from typing import Any
 from zealot_lcd_feeds import LcdEvent, parse_iso_ts, short_text
 
 try:
-    from zealot_sip_flash import read_active_call_exts_highlight, read_ext_last_call_ts
+    from zealot_sip_flash import (
+        read_active_call_exts_highlight,
+        read_ext_last_call_ts,
+        transcript_panel_segment_rows,
+    )
 except Exception:  # pragma: no cover - optional on development hosts
     def read_active_call_exts_highlight(path=None) -> set[str]:
         return set()
 
     def read_ext_last_call_ts(path=None) -> dict[str, float]:
         return {}
+
+    def transcript_panel_segment_rows(
+        turns: list,
+        width: int,
+        max_rows: int,
+        now: float | None = None,
+    ) -> list[tuple[list[tuple[str, str]], str]]:
+        return []
 
 try:
     from zealot_wopr_lcd import joshua_defcon_ticker
@@ -124,6 +136,8 @@ VITALS_BAR_W = 12
 DETAIL_SCROLL_SPEED = 10.0
 IRC_SCROLL_SPEED = 9.0
 PBX_AGENT_VISIBLE = 4
+PBX_AGENT_VISIBLE_CALL = 2
+PBX_TRANSCRIPT_ROWS = 6
 HUMAN_EXTS = frozenset({"100", "101", "102", "110"})
 AGENT_EXT_W = 4
 AGENT_LAST_W = 12
@@ -2059,7 +2073,8 @@ def panel_lines(
     width: int = WIDTH,
     now: float | None = None,
     call_exts: set[str] | None = None,
-) -> list[tuple[str, str]]:
+    sip_flash: Any | None = None,
+) -> list[tuple[DetailRow, str]]:
     status = snapshot.get("status") or {}
     bridge = snapshot.get("bridge") or {}
     events: list[LcdEvent] = snapshot.get("events") or []
@@ -2075,7 +2090,7 @@ def panel_lines(
     if mode == "rgb":
         return rgb_battle_panel(snapshot, width, now=ts)
     if mode == "agents":
-        return agents_panel(bridge, status, width, now=ts, call_exts=call_exts)
+        return agents_panel(bridge, status, width, now=ts, call_exts=call_exts, sip_flash=sip_flash)
     if mode == "bridge":
         return bridge_panel(bridge, width, now=ts)
     return bridge_panel(bridge, width, now=ts)
@@ -2505,13 +2520,26 @@ def rgb_battle_panel(snapshot: dict[str, Any], width: int, now: float | None = N
     return rows[:7]
 
 
+def _sip_transcript_live(sip_flash: Any | None) -> bool:
+    if sip_flash is None:
+        return False
+    active_fn = getattr(sip_flash, "active", None)
+    if not callable(active_fn) or not active_fn():
+        return False
+    try:
+        return max(0, int(getattr(sip_flash, "active_lines", 0) or 0)) > 0
+    except (TypeError, ValueError):
+        return True
+
+
 def agents_panel(
     bridge: dict[str, Any],
     status: dict[str, Any],
     width: int,
     now: float | None = None,
     call_exts: set[str] | None = None,
-) -> list[tuple[str, str]]:
+    sip_flash: Any | None = None,
+) -> list[tuple[DetailRow, str]]:
     ts = time.time() if now is None else now
     roster = pbx_agent_roster(bridge)
     active_exts = set(call_exts or ())
@@ -2522,9 +2550,11 @@ def agents_panel(
         pbx_phone_last_call_ts_map(status),
     )
     seen_ts_map = pbx_phone_last_seen_ts_map(status)
+    transcript_live = _sip_transcript_live(sip_flash)
+    visible_slots = PBX_AGENT_VISIBLE_CALL if transcript_live else PBX_AGENT_VISIBLE
     visible, page_num, page_count = agent_visible_rows(
         roster,
-        PBX_AGENT_VISIBLE,
+        visible_slots,
         ts,
         active_exts,
     )
@@ -2552,6 +2582,17 @@ def agents_panel(
         )
         footer_style = "NOC"
     rows.append((detail_kv("PBX STATUS", footer, width, now=ts, scroll=False), footer_style))
+    if transcript_live:
+        rows.append((section_bar("CALL LOG", width), "PBX_CALL"))
+        turns = list(getattr(sip_flash, "turns", None) or [])
+        for segments, row_style in transcript_panel_segment_rows(
+            turns,
+            width,
+            PBX_TRANSCRIPT_ROWS,
+            now=ts,
+        ):
+            rows.append((segments, row_style))
+        return rows
     return rows[:7]
 
 

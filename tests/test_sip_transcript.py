@@ -10,7 +10,11 @@ if str(LCD) not in sys.path:
     sys.path.insert(0, str(LCD))
 
 import zealot_sip_flash  # noqa: E402
-from zealot_sip_flash import SipCallFlash, transcript_display_lines  # noqa: E402
+from zealot_sip_flash import (  # noqa: E402
+    SipCallFlash,
+    transcript_display_lines,
+    transcript_panel_segment_rows,
+)
 
 
 class TranscriptLineTests(unittest.TestCase):
@@ -30,8 +34,8 @@ class TranscriptLineTests(unittest.TestCase):
             },
         ]
         lines = transcript_display_lines(turns, width=40, max_rows=20, now=1000.0)
-        self.assertTrue(any("aday:" in row for row, _style in lines))
-        self.assertTrue(any("Hermes:" in row for row, _style in lines))
+        self.assertTrue(any("[aday]" in row for row, _style in lines))
+        self.assertTrue(any("[Hermes]" in row for row, _style in lines))
         self.assertTrue(all(len(row) <= 40 for row, _style in lines))
 
     def test_scroll_pins_to_latest_rows(self):
@@ -50,6 +54,23 @@ class TranscriptLineTests(unittest.TestCase):
         joined = " ".join(row for row, _style in lines)
         self.assertIn("turn-11", joined)
         self.assertNotIn("turn-0", joined)
+
+
+class TranscriptSegmentTests(unittest.TestCase):
+    def test_bracketed_segment_rows(self):
+        turns = [
+            {
+                "role": "user",
+                "label": "aday",
+                "text": "check the mesh",
+                "ts": "2026-06-16T12:04:00Z",
+            }
+        ]
+        rows = transcript_panel_segment_rows(turns, width=40, max_rows=4, now=1000.0)
+        flat = "".join(text for text, _ in rows[0][0])
+        self.assertIn("[aday]", flat)
+        self.assertTrue(flat.strip().startswith("["))
+        self.assertIn("check the mesh", flat)
 
 
 class SipFlashTurnTests(unittest.TestCase):

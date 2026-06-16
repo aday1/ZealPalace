@@ -422,18 +422,14 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
             draw_fn=draw_raw,
         )
         return
-    set_tmux_bar(snapshot=snapshot, mode=mode)
-    if (
+    sip_active = (
         sip_flash is not None
         and getattr(sip_flash, "active", lambda: False)()
-        and mode != "agents"
         and _sip_overlay_allowed(sip_flash)
-    ):
-        draw_sip_overlay(stdscr, sip_flash, now, input_row)
-        stdscr.refresh()
-        return
-
+    )
+    set_tmux_bar(snapshot=snapshot, mode=mode)
     call_exts = set(getattr(sip_flash, "active_exts", set()) or ()) if sip_flash is not None else set()
+    panel_mode = "agents" if sip_active else mode
     add_line(stdscr, 0, comet_line(header_title(snapshot, mode).strip(), now), "GLINT", raw=True, now=now)
     add_line(stdscr, 1, static_rule(frame_w), "RASTER", raw=True, now=now)
     add_line(stdscr, 2, demoscene_greetz(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
@@ -453,11 +449,20 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     )
 
     row = 4
-    for art_row in mode_art(mode, now, frame_w):
+    for art_row in mode_art(panel_mode, now, frame_w):
         add_line(stdscr, row, art_row, "ART", raw=True, now=now)
         row += 1
 
-    for idx, (text, style) in enumerate(panel_lines(snapshot, mode, frame_w, now, call_exts)):
+    for idx, (text, style) in enumerate(
+        panel_lines(
+            snapshot,
+            panel_mode,
+            frame_w,
+            now,
+            call_exts,
+            sip_flash=sip_flash if sip_active else None,
+        )
+    ):
         if isinstance(text, list):
             add_segment_line(stdscr, row, text, now=now)
         else:
@@ -487,7 +492,12 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     if input_buf:
         input_text = fit("> " + input_buf[-(frame_w - 3) :], frame_w)
     else:
-        input_text = lcd_status_line(snapshot, mode, now, frame_w)
+        if sip_active and sip_flash is not None:
+            headline = str(getattr(sip_flash, "headline", "") or "PBX CALL")[:frame_w]
+            state = str(getattr(sip_flash, "active_state", "") or "active").upper()
+            input_text = fit(f"CALL {headline} | {state} | tail live", frame_w)
+        else:
+            input_text = lcd_status_line(snapshot, mode, now, frame_w)
     add_line(stdscr, input_row, input_text, "INPUT", bold=True, now=now)
     stdscr.refresh()
 
