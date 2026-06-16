@@ -298,28 +298,59 @@ class ModeBarTests(unittest.TestCase):
 
 class TickerTests(unittest.TestCase):
     def test_ticker_includes_version_and_agent_summaries(self):
+        now = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc).timestamp()
+        recent = "2026-06-17T11:30:00Z"
         snapshot = {
             "status": {
                 "vector_ok": True,
                 "pbx_api_ok": True,
                 "agent_tickers": {
                     "agents": {
-                        "122": {"summary": "mesh quiet"},
-                        "123": {"summary": "ticket open"},
-                        "130": {"summary": "retainer billed"},
+                        "122": {"summary": "Navi session saved for ext 110"},
+                        "123": {"summary": "Simon IT-1 open: broken screen"},
+                        "130": {"summary": "Max: retainer billed caller"},
                     }
                 },
-                "pbx_phones": {"phones": []},
+                "pbx_phones": {
+                    "phones": [
+                        {"ext": "122", "last_call": recent},
+                        {"ext": "123", "last_call": recent},
+                        {"ext": "130", "last_call": recent},
+                    ]
+                },
                 "navi": {},
             },
             "bridge": {},
         }
-        row = ticker_text(snapshot)
+        row = ticker_text(snapshot, now=now)
         self.assertIn(LCD_TICKER_VERSION, row)
         self.assertIn("NAVI", row)
         self.assertIn("SIMON", row)
         self.assertIn("LAWYER", row)
         self.assertLessEqual(len(row.split(" · ")[0]), 20)
+
+    def test_ticker_hides_idle_and_stale_agent_summaries(self):
+        now = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc).timestamp()
+        snapshot = {
+            "status": {
+                "vector_ok": True,
+                "pbx_api_ok": True,
+                "agent_tickers": {
+                    "agents": {
+                        "122": {"summary": "Navi 122 quiet"},
+                        "123": {"summary": "Simon: no tickets for this ext"},
+                        "130": {"summary": "Max Retainer: intake folder ready"},
+                    }
+                },
+                "pbx_phones": {"phones": [{"ext": "123", "last_call": "2026-06-10T08:00:00Z"}]},
+                "navi": {},
+            },
+            "bridge": {},
+        }
+        row = ticker_text(snapshot, now=now)
+        self.assertNotIn("NAVI", row)
+        self.assertNotIn("SIMON", row)
+        self.assertNotIn("LAWYER", row)
 
     def test_lan_bus_line_fits_width(self):
         status = {

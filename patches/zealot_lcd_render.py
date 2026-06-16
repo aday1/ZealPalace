@@ -82,7 +82,14 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0617b"
+LCD_TICKER_VERSION = "tkr0617c"
+AGENT_CALL_FRESH_SEC = 2 * 3600
+AGENT_TICKER_SHOW_SEC = 25 * 60
+AGENT_TICKER_IDLE_RE = re.compile(
+    r"(?i)(quiet|no tickets|ticket desk idle|intake folder|standing by|"
+    r"no prior calls|file open|awaiting further|tap navi|parody counsel)"
+)
+_AGENT_TICKER_SEEN: dict[str, tuple[str, float]] = {}
 RASTER_SPEED = 0.35
 TUNNEL_SPEED = 0.2
 COMET_SPEED = 1.5
@@ -2147,8 +2154,37 @@ def pbx_phone_summary_map(status: dict[str, Any]) -> dict[str, str]:
     return out
 
 
-def agent_ticker_bits(status: dict[str, Any]) -> list[str]:
-    """Call-summary one-liners for Navi, Simon, Lawyer (pushed from CELES)."""
+def _agent_ticker_idle(summary: str) -> bool:
+    clean = re.sub(r"\s+", " ", str(summary or "")).strip()
+    return not clean or bool(AGENT_TICKER_IDLE_RE.search(clean))
+
+
+def _agent_summary_fresh(ext: str, summary: str, status: dict[str, Any], now: float) -> bool:
+    """Show agent ticker lines only after a recent call or a newly changed summary."""
+    if _agent_ticker_idle(summary):
+        return False
+    last_call_ts = pbx_phone_last_call_ts_map(status).get(ext, 0.0)
+    if last_call_ts and now - last_call_ts <= AGENT_CALL_FRESH_SEC:
+        _AGENT_TICKER_SEEN[ext] = (summary, now)
+        return True
+    if ext == "122":
+        navi = as_dict(status.get("navi"))
+        navi_ts = parse_iso_ts(str(navi.get("updated") or navi.get("ts") or ""))
+        if navi_ts and now - navi_ts <= AGENT_TICKER_SHOW_SEC:
+            _AGENT_TICKER_SEEN[ext] = (summary, now)
+            return True
+    prev = _AGENT_TICKER_SEEN.get(ext)
+    if not prev or prev[0] != summary:
+        _AGENT_TICKER_SEEN[ext] = (summary, now)
+        return True
+    if now - prev[1] <= AGENT_TICKER_SHOW_SEC:
+        return True
+    return False
+
+
+def agent_ticker_bits(status: dict[str, Any], now: float | None = None) -> list[str]:
+    """Call-summary one-liners for Navi, Simon, Lawyer — only while fresh."""
+    ts = time.time() if now is None else now
     bits: list[str] = []
     agent_tickers = as_dict(status.get("agent_tickers"))
     agents = agent_tickers.get("agents") if isinstance(agent_tickers.get("agents"), dict) else {}
@@ -2164,7 +2200,7 @@ def agent_ticker_bits(status: dict[str, Any]) -> list[str]:
             summary = navi_line
         if not summary:
             summary = phone_summaries.get(ext, "")
-        if summary:
+        if summary and _agent_summary_fresh(ext, summary, status, ts):
             bits.append(f"{label} {short_text(summary, 56)}")
     return bits
 
@@ -2190,9 +2226,10 @@ def agents_art_live(snapshot: dict[str, Any], width: int = WIDTH) -> list[str]:
     ]
 
 
-def ticker_text(snapshot: dict[str, Any]) -> str:
+def ticker_text(snapshot: dict[str, Any], now: float | None = None) -> str:
     status = snapshot.get("status") or {}
     bridge = snapshot.get("bridge") or {}
+    ts = time.time() if now is None else now
     bits: list[str] = [
         f"tkr {LCD_TICKER_VERSION}",
         "VEC " + ("OK" if status.get("vector_ok") else "DOWN"),
@@ -2200,7 +2237,7 @@ def ticker_text(snapshot: dict[str, Any]) -> str:
         f"zone {short_text(bridge.get('hot_zone') or '?', 14)}",
         f"npc {bridge.get('npc_count', 0)}",
     ]
-    bits.extend(agent_ticker_bits(status))
+    bits.extend(agent_ticker_bits(status, now=ts))
     bits.append(short_text(joshua_defcon_ticker(), 42))
     return " · ".join(bit for bit in bits if bit)
 

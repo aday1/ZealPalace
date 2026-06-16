@@ -12,7 +12,7 @@ import signal
 import time
 from pathlib import Path
 
-from zealot_lcd_feeds import CACHE, IrcTap, collect_snapshot, now_iso
+from zealot_lcd_feeds import CACHE, IrcTap, collect_snapshot, event_is_recurring_noise, now_iso
 from zealot_lcd_feeds import FEED_NOISE_RE
 from zealot_lcd_render import (
     HEIGHT,
@@ -33,6 +33,7 @@ from zealot_lcd_render import (
     gpu_summary,
     header_title,
     lcd_status_line,
+    agents_art_live,
     mode_art_compact,
     mode_name,
     mode_section_bar,
@@ -466,7 +467,11 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     add_line(stdscr, zones["mode_bar"], mode_section_bar(mode, frame_w, now), "CYAN", bold=True, raw=True, now=now)
 
     # --- Compact centered ASCII art (2 rows) ---
-    for offset, art_row in enumerate(mode_art_compact(panel_mode, now, frame_w)):
+    if panel_mode == "agents":
+        art_rows = agents_art_live(snapshot, frame_w)
+    else:
+        art_rows = mode_art_compact(panel_mode, now, frame_w)
+    for offset, art_row in enumerate(art_rows):
         add_line(stdscr, zones["art_start"] + offset, art_row, "ART", raw=True, now=now)
 
     # --- Panel zone (fixed 7 rows): NOC HOST TABLE / agents+transcript / etc. ---
@@ -498,6 +503,8 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
     event_slot_rows: list[list[tuple[str, str]]] = []
     for event in snapshot.get("events") or []:
+        if event_is_recurring_noise(event):
+            continue
         event_slot_rows.append(event_segments(event, frame_w, now=now))
     event_slots = max(1, zones["events_end"] - zones["events_start"])
     event_slot_rows = event_slot_rows[-event_slots:]

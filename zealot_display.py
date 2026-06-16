@@ -12,7 +12,7 @@ import signal
 import time
 from pathlib import Path
 
-from zealot_lcd_feeds import CACHE, IrcTap, collect_snapshot, now_iso
+from zealot_lcd_feeds import CACHE, IrcTap, collect_snapshot, event_is_recurring_noise, now_iso
 from zealot_lcd_feeds import FEED_NOISE_RE
 from zealot_lcd_render import (
     HEIGHT,
@@ -503,6 +503,8 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
     event_slot_rows: list[list[tuple[str, str]]] = []
     for event in snapshot.get("events") or []:
+        if event_is_recurring_noise(event):
+            continue
         event_slot_rows.append(event_segments(event, frame_w, now=now))
     event_slots = max(1, zones["events_end"] - zones["events_start"])
     event_slot_rows = event_slot_rows[-event_slots:]

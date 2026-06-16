@@ -70,6 +70,8 @@ METRIC_HISTORY: dict[str, deque[float]] = {
 _NET_LAST: dict[str, float] = {}
 _REMOTE_LAST_PULL = 0.0
 _REMOTE_LAST_DATA: dict[str, Any] | None = None
+_CELES_STALE_WARN_TS = 0.0
+CELES_STALE_WARN_COOLDOWN_SEC = 900.0
 
 FEED_NOISE_RE = re.compile(
     r"(?i)(export\s+TERM|zealot_display|display_loop(?:\.sh)?|lcd-init|"
@@ -900,7 +902,27 @@ def dedupe_events(items: Iterable[LcdEvent], limit: int = 80) -> list[LcdEvent]:
     return out[-limit:]
 
 
+def event_is_recurring_noise(event: LcdEvent) -> bool:
+    if event.stale:
+        return True
+    if feed_line_is_noise(event.nick, event.text):
+        return True
+    body = re.sub(r"\s+", " ", str(event.text or "")).strip().lower()
+    if event.kind == "status" and any(
+        token in body
+        for token in (
+            "irc log stale",
+            "irc log unavailable",
+            "bridge unavailable",
+            "using pi/direct feeds",
+        )
+    ):
+        return True
+    return False
+
+
 def collect_snapshot(irc_tap: IrcTap | None = None, limit: int = 80) -> dict[str, Any]:
+    global _CELES_STALE_WARN_TS
     direct_events: list[LcdEvent] = []
     direct_status: dict[str, Any] = {"ok": False, "error": "disabled"}
     if irc_tap:
@@ -918,41 +940,49 @@ def collect_snapshot(irc_tap: IrcTap | None = None, limit: int = 80) -> dict[str
     if c_status.get("fresh"):
         source_events.extend(c_events)
     else:
-        if c_status.get("ok") and c_status.get("latest_ts"):
-            source_events.append(
-                LcdEvent(
-                    source="SYS",
-                    channel="celes",
-                    nick="irc-log-api",
-                    text=f"CELES IRC log stale since {c_status['latest_ts']}; using Pi/direct feeds",
-                    kind="status",
-                    canon="ops",
-                    ts=now_iso(),
-                    sort_ts=time.time(),
-                    priority=4,
-                    stale=True,
+        now_ts = time.time()
+        if now_ts - _CELES_STALE_WARN_TS >= CELES_STALE_WARN_COOLDOWN_SEC:
+            if c_status.get("ok") and c_status.get("latest_ts"):
+                _CELES_STALE_WARN_TS = now_ts
+                source_events.append(
+                    LcdEvent(
+                        source="SYS",
+                        channel="celes",
+                        nick="irc-log-api",
+                        text=f"CELES IRC log stale since {c_status['latest_ts']}; using Pi/direct feeds",
+                        kind="status",
+                        canon="ops",
+                        ts=now_iso(),
+                        sort_ts=now_ts,
+                        priority=4,
+                        stale=True,
+                    )
                 )
-            )
-        elif c_status.get("error"):
-            source_events.append(
-                LcdEvent(
-                    source="SYS",
-                    channel="celes",
-                    nick="irc-log-api",
-                    text="CELES IRC log unavailable: " + short_text(c_status.get("error"), 120),
-                    kind="status",
-                    canon="ops",
-                    ts=now_iso(),
-                    sort_ts=time.time(),
-                    priority=4,
-                    stale=True,
+            elif c_status.get("error"):
+                _CELES_STALE_WARN_TS = now_ts
+                source_events.append(
+                    LcdEvent(
+                        source="SYS",
+                        channel="celes",
+                        nick="irc-log-api",
+                        text="CELES IRC log unavailable: " + short_text(c_status.get("error"), 120),
+                        kind="status",
+                        canon="ops",
+                        ts=now_iso(),
+                        sort_ts=now_ts,
+                        priority=4,
+                        stale=True,
+                    )
                 )
-            )
         source_events.extend(local)
 
     source_events.extend(b_events)
 
-    events = dedupe_events(source_events, limit=limit)
+    events = [
+        event
+        for event in dedupe_events(source_events, limit=limit)
+        if not event_is_recurring_noise(event)
+    ]
     return {
         "ts": now_iso(),
         "events": events,
