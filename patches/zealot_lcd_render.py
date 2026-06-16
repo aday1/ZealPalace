@@ -2652,18 +2652,21 @@ def lounge_panel(events: list[LcdEvent], width: int, now: float | None = None) -
     return lines[:7]
 
 
-def render_text_frame(snapshot: dict[str, Any], now: float | None = None) -> list[str]:
+def render_text_frame(snapshot: dict[str, Any], now: float | None = None, tick: int = 0) -> list[str]:
     ts = time.time() if now is None else now
     mode = mode_name(ts)
     rows: list[str] = []
     rows.append(comet_line(header_title(snapshot, mode).strip(), ts))
-    rows.append(raster_bar(ts))
+    rows.append(dashboard_header(snapshot, mode, ts, tick, WIDTH))
+    rows.append(defcon_status_line(WIDTH))
     rows.append(demoscene_greetz(snapshot, ts, WIDTH))
     rows.append(chunky_scroller(ticker_text(snapshot) + " // " + gpu_summary(snapshot), anim_now(ts), WIDTH, speed=SCROLLER_SPEED))
+    rows.append(mode_section_bar(mode, WIDTH, ts))
+    rows.append(section_bar(panel_section_label(mode), WIDTH))
     rows.extend(mode_art(mode, ts, WIDTH))
     rows.extend(line for line, _style in panel_lines(snapshot, mode, WIDTH))
     rows.append(calendar_line(ts, WIDTH))
-    rows.append(motivational_line(snapshot, ts, WIDTH))
+    rows.append(dashboard_footer(snapshot, ts, tick, WIDTH))
     rows.append(marquee(banner_text(snapshot), WIDTH, MARQUEE_SPEED, ts))
     rows.append(tunnel_line(ts, WIDTH))
     rows.append(comet_line("EVENTS", ts + 2.0, WIDTH))

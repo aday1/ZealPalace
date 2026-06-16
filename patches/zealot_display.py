@@ -25,6 +25,7 @@ from zealot_lcd_render import (
     calendar_line,
     chunky_scroller,
     comet_line,
+    dashboard_footer_segments,
     dashboard_header,
     defcon_status_line,
     demoscene_greetz,
@@ -36,9 +37,10 @@ from zealot_lcd_render import (
     marquee,
     mode_art,
     mode_name,
-    motivational_line,
+    mode_section_bar,
     pad,
     panel_lines,
+    panel_section_label,
     section_bar,
     sparkle_line,
     static_rule,
@@ -459,7 +461,17 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         now=now,
     )
 
-    row = 5
+    add_line(stdscr, 5, mode_section_bar(mode, frame_w, now), "CYAN", bold=True, raw=True, now=now)
+    add_line(
+        stdscr,
+        6,
+        section_bar(panel_section_label(panel_mode), frame_w),
+        "GLINT",
+        raw=True,
+        now=now,
+    )
+
+    row = 7
     for art_row in mode_art(panel_mode, now, frame_w):
         add_line(stdscr, row, art_row, "ART", raw=True, now=now)
         row += 1
@@ -482,7 +494,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
 
     add_line(stdscr, row, calendar_line(now, frame_w), "SYS", raw=True, now=now)
     row += 1
-    add_line(stdscr, row, motivational_line(snapshot, now, frame_w), "MOTIVE", raw=True, now=now)
+    add_segment_line(stdscr, row, dashboard_footer_segments(snapshot, now, tick, frame_w), now=now)
     row += 1
     add_line(stdscr, row, marquee(banner_text(snapshot), frame_w, MARQUEE_SPEED, now), "BANNER", bold=True, now=now)
     row += 1
