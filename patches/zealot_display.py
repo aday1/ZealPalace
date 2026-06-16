@@ -18,14 +18,30 @@ from zealot_lcd_render import (
     HEIGHT,
     WIDTH,
     banner_text,
+    chunky_scroller,
+    comet_line,
+    demoscene_greetz,
     event_lines,
     fit,
+    gpu_summary,
     header_title,
     marquee,
     mode_name,
+    mode_art,
+    motivational_line,
+    pad,
     panel_lines,
+    raster_bar,
+    sparkle_line,
     ticker_text,
+    tunnel_line,
+    transition_text,
 )
+
+try:
+    import pyfiglet
+except Exception:  # pragma: no cover - optional on development hosts
+    pyfiglet = None
 
 try:
     from zealot_noc_mesh import NocMeshStatus
@@ -55,6 +71,12 @@ PAIR_BAD = 8
 PAIR_DIM = 9
 PAIR_INPUT = 10
 PAIR_EVENT = 11
+PAIR_ART = 12
+PAIR_GLINT = 13
+PAIR_BANNER = 14
+PAIR_RASTER = 15
+PAIR_GREETZ = 16
+PAIR_MOTIVE = 17
 
 
 def heartbeat(now: float | None = None) -> None:
@@ -66,9 +88,19 @@ def heartbeat(now: float | None = None) -> None:
 
 
 def figlet_lines(text: str, max_w: int = WIDTH, fonts=None) -> list[str]:
-    del fonts
-    clean = str(text or "")[:max_w]
-    return [clean.center(max_w)]
+    clean = str(text or "").strip()[:16]
+    if not clean:
+        return []
+    if pyfiglet is not None:
+        for font in fonts or ("small", "digital", "mini"):
+            try:
+                rendered = pyfiglet.figlet_format(clean, font=font, width=max_w)
+            except Exception:
+                continue
+            rows = [row.rstrip() for row in rendered.splitlines() if row.strip()]
+            if rows and max(len(row) for row in rows) <= max_w:
+                return [pad(row.center(max_w), max_w) for row in rows]
+    return [pad(clean.center(max_w), max_w)]
 
 
 def init_colors() -> None:
@@ -86,6 +118,12 @@ def init_colors() -> None:
         (PAIR_DIM, curses.COLOR_WHITE, curses.COLOR_BLACK),
         (PAIR_INPUT, curses.COLOR_GREEN, curses.COLOR_BLACK),
         (PAIR_EVENT, curses.COLOR_WHITE, curses.COLOR_BLACK),
+        (PAIR_ART, curses.COLOR_BLUE, curses.COLOR_BLACK),
+        (PAIR_GLINT, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
+        (PAIR_BANNER, curses.COLOR_RED, curses.COLOR_BLACK),
+        (PAIR_RASTER, curses.COLOR_BLUE, curses.COLOR_BLACK),
+        (PAIR_GREETZ, curses.COLOR_GREEN, curses.COLOR_BLACK),
+        (PAIR_MOTIVE, curses.COLOR_YELLOW, curses.COLOR_BLACK),
     )
     for pair, fg, bg in pairs:
         try:
@@ -94,8 +132,25 @@ def init_colors() -> None:
             pass
 
 
-def attr_for(style: str, bold: bool = False) -> int:
-    pair = {
+def attr_for(style: str, bold: bool = False, now: float | None = None, row: int = 0) -> int:
+    if style == "GLINT":
+        cycle = (PAIR_HEADER, PAIR_TICKER, PAIR_ST, PAIR_NOC)
+        pair = cycle[int((now or 0) * 5 + row) % len(cycle)]
+    elif style == "ART":
+        cycle = (PAIR_ART, PAIR_RPG, PAIR_ST, PAIR_NOC)
+        pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
+    elif style == "BANNER":
+        pair = PAIR_BANNER if int((now or 0) * 2) % 2 else PAIR_RPG
+    elif style == "RASTER":
+        cycle = (PAIR_RASTER, PAIR_NOC, PAIR_TICKER, PAIR_RPG)
+        pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
+    elif style == "GREETZ":
+        cycle = (PAIR_GREETZ, PAIR_ST, PAIR_TICKER, PAIR_NOC)
+        pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
+    elif style == "MOTIVE":
+        pair = PAIR_MOTIVE if int((now or 0) // 2) % 2 else PAIR_RPG
+    else:
+        pair = {
         "RPG": PAIR_RPG,
         "ST": PAIR_ST,
         "GMQ": PAIR_ST,
@@ -106,20 +161,36 @@ def attr_for(style: str, bold: bool = False) -> int:
         "ZH": PAIR_EVENT,
         "ZP": PAIR_EVENT,
         "IRC": PAIR_EVENT,
-    }.get(style, PAIR_EVENT)
+        "INPUT": PAIR_INPUT,
+        }.get(style, PAIR_EVENT)
     attr = curses.color_pair(pair)
     if style == "SYS":
         attr |= curses.A_DIM
+    if style in ("GLINT", "BANNER", "GREETZ", "MOTIVE"):
+        attr |= curses.A_BOLD
+    if style == "RASTER" and int((now or 0) * 2 + row) % 3 == 0:
+        attr |= curses.A_REVERSE
+    if style == "ART" and int((now or 0) * 3 + row) % 5 == 0:
+        attr |= curses.A_BOLD
     if bold:
         attr |= curses.A_BOLD
     return attr
 
 
-def add_line(stdscr, row: int, text: str, style: str = "SYS", bold: bool = False) -> None:
+def add_line(
+    stdscr,
+    row: int,
+    text: str,
+    style: str = "SYS",
+    bold: bool = False,
+    raw: bool = False,
+    now: float | None = None,
+) -> None:
     if row < 0 or row >= HEIGHT:
         return
+    value = pad(text, WIDTH) if raw else fit(text, WIDTH)
     try:
-        stdscr.addnstr(row, 0, fit(text, WIDTH), WIDTH, attr_for(style, bold))
+        stdscr.addnstr(row, 0, value, WIDTH, attr_for(style, bold, now, row))
     except curses.error:
         pass
 
@@ -140,36 +211,100 @@ def send_to_zealot(message: str) -> None:
         pass
 
 
+def draw_raw(stdscr, row: int, text: str, pair: int, flags: int = 0) -> None:
+    if row < 0 or row >= HEIGHT:
+        return
+    try:
+        stdscr.addnstr(row, 0, pad(text, WIDTH), WIDTH, curses.color_pair(pair) | flags)
+    except curses.error:
+        pass
+
+
+def draw_sip_overlay(stdscr, sip_flash, now: float, input_row: int) -> None:
+    flash_on = int(now * 4) % 2 == 0
+    bg_pair = PAIR_BAD if flash_on else PAIR_PBX
+    bg_flags = curses.A_REVERSE | curses.A_BOLD if flash_on else curses.A_BOLD
+    for row in range(input_row):
+        draw_raw(stdscr, row, " " * WIDTH, bg_pair, bg_flags)
+
+    headline = str(getattr(sip_flash, "headline", "") or "PBX CALL")[:18]
+    state = str(getattr(sip_flash, "active_state", "") or "active").upper()
+    subline = str(getattr(sip_flash, "subline", "") or "")[:WIDTH]
+    detail = str(getattr(sip_flash, "detail", "") or "")[:WIDTH]
+    try:
+        active_lines = max(1, int(getattr(sip_flash, "active_lines", 1) or 1))
+    except (TypeError, ValueError):
+        active_lines = 1
+
+    draw_raw(stdscr, 0, comet_line(f"PBX {active_lines} LINE{'S' if active_lines != 1 else ''} ACTIVE", now), bg_pair, bg_flags)
+    draw_raw(stdscr, 1, sparkle_line(now), PAIR_WARN, curses.A_BOLD)
+    row = 3
+    for line in figlet_lines(headline, WIDTH, fonts=("smslant", "small", "digital", "mini"))[:6]:
+        draw_raw(stdscr, row, line, PAIR_WARN if flash_on else PAIR_PBX, curses.A_BOLD)
+        row += 1
+    for text, pair in (
+        (state.center(WIDTH), PAIR_BAD if flash_on else PAIR_WARN),
+        (subline.center(WIDTH), PAIR_PBX),
+        (detail.center(WIDTH), PAIR_PBX),
+        ("SIP event from CELES PBX monitor".center(WIDTH), PAIR_DIM),
+    ):
+        draw_raw(stdscr, row, text, pair, curses.A_BOLD if pair != PAIR_DIM else curses.A_DIM)
+        row += 1
+    draw_raw(stdscr, input_row, "> call overlay active", PAIR_INPUT, curses.A_BOLD)
+
+
 def draw(stdscr, snapshot: dict, input_buf: str, now: float, sip_flash=None) -> None:
     mode = mode_name(now)
+    screen_h, _screen_w = stdscr.getmaxyx()
+    usable_h = max(8, min(HEIGHT, screen_h))
+    input_row = usable_h - 1
     stdscr.erase()
-    add_line(stdscr, 0, header_title(snapshot, mode), "SYS", bold=True)
-    add_line(stdscr, 1, marquee(ticker_text(snapshot), WIDTH, 18, now), "NOC", bold=True)
-
     if sip_flash is not None and getattr(sip_flash, "active", lambda: False)():
-        title = getattr(sip_flash, "header_title", lambda width: "")(WIDTH)
-        if title:
-            add_line(stdscr, 0, title, "PBX", bold=True)
-        try:
-            sip_flash.draw(stdscr, 2, WIDTH, PAIR_PBX, PAIR_WARN)
-        except Exception:
-            pass
-    else:
-        for idx, (text, style) in enumerate(panel_lines(snapshot, mode, WIDTH), start=2):
-            add_line(stdscr, idx, text, style, bold=(idx == 2))
+        draw_sip_overlay(stdscr, sip_flash, now, input_row)
+        stdscr.refresh()
+        return
 
-    add_line(stdscr, 10, marquee(banner_text(snapshot), WIDTH, 10, now), "RPG", bold=True)
-    add_line(stdscr, 11, "-" * 12 + " EVENTS " + "-" * 20, "SYS")
+    add_line(stdscr, 0, comet_line(header_title(snapshot, mode).strip(), now), "GLINT", raw=True, now=now)
+    add_line(stdscr, 1, raster_bar(now), "RASTER", raw=True, now=now)
+    add_line(stdscr, 2, demoscene_greetz(snapshot, now, WIDTH), "GREETZ", raw=True, now=now)
+    add_line(
+        stdscr,
+        3,
+        chunky_scroller(ticker_text(snapshot) + " // " + gpu_summary(snapshot), now, WIDTH, speed=3.0),
+        "NOC",
+        bold=True,
+        raw=True,
+        now=now,
+    )
+
+    row = 4
+    for art_row in mode_art(mode, now, WIDTH):
+        add_line(stdscr, row, art_row, "ART", raw=True, now=now)
+        row += 1
+
+    for idx, (text, style) in enumerate(panel_lines(snapshot, mode, WIDTH)):
+        add_line(stdscr, row, transition_text(text, now, idx, WIDTH), style, bold=(idx == 0), raw=True, now=now)
+        row += 1
+
+    add_line(stdscr, row, motivational_line(snapshot, now, WIDTH), "MOTIVE", raw=True, now=now)
+    row += 1
+    add_line(stdscr, row, marquee(banner_text(snapshot), WIDTH, 10, now), "BANNER", bold=True, now=now)
+    row += 1
+    add_line(stdscr, row, tunnel_line(now, WIDTH), "RASTER", raw=True, now=now)
+    row += 1
+    add_line(stdscr, row, comet_line("EVENTS", now + 2.0), "GLINT", raw=True, now=now + 2.0)
+    row += 1
 
     rows = []
     for event in snapshot.get("events") or []:
         rows.extend(event_lines(event, WIDTH))
-    rows = rows[-20:]
-    start = 12 + max(0, 20 - len(rows))
+    event_slots = max(1, input_row - row)
+    rows = rows[-event_slots:]
+    start = row + max(0, event_slots - len(rows))
     for idx, (text, style) in enumerate(rows):
-        add_line(stdscr, start + idx, text, style)
+        add_line(stdscr, start + idx, transition_text(text, now, idx + 20, WIDTH), style, raw=True, now=now)
 
-    add_line(stdscr, HEIGHT - 1, "> " + input_buf[-(WIDTH - 3) :], "SYS", bold=True)
+    add_line(stdscr, input_row, "> " + input_buf[-(WIDTH - 3) :], "INPUT", bold=True, now=now)
     stdscr.refresh()
 
 

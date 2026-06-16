@@ -1,7 +1,22 @@
 import unittest
 
 from zealot_lcd_feeds import LcdEvent, dedupe_events, parse_local_line
-from zealot_lcd_render import WIDTH, event_lines, render_text_frame
+from zealot_lcd_render import (
+    WIDTH,
+    bar,
+    chunky_scroller,
+    comet_line,
+    demoscene_greetz,
+    event_lines,
+    gpu_summary,
+    mode_art,
+    motivational_line,
+    raster_bar,
+    render_text_frame,
+    spark,
+    sparkle_line,
+    tunnel_line,
+)
 
 
 class LcdFeedTests(unittest.TestCase):
@@ -39,6 +54,37 @@ class LcdRenderTests(unittest.TestCase):
         frame = render_text_frame(snapshot, now=0)
         self.assertEqual(len(frame), 34)
         self.assertTrue(all(len(row) == WIDTH for row in frame))
+
+    def test_flourish_lines_fit_width(self):
+        self.assertEqual(len(comet_line("ZEAL", now=1, width=WIDTH)), WIDTH)
+        self.assertEqual(len(sparkle_line(now=1, width=WIDTH)), WIDTH)
+        for mode in ("terrarium", "ops", "rpg", "agents", "bridge", "lounge"):
+            for row in mode_art(mode, now=1, width=WIDTH):
+                self.assertEqual(len(row), WIDTH)
+
+    def test_graph_helpers_are_fixed_width(self):
+        self.assertEqual(len(bar(55, width=8)), 10)
+        self.assertEqual(len(spark([0, 25, 50, 75, 100], width=12)), 12)
+
+    def test_demoscene_helpers_fit_width(self):
+        snapshot = {
+            "status": {
+                "telemetry": {
+                    "remote": {
+                        "hosts": {
+                            "vector": {"gpus": [{"util_pct": 42, "mem_used_mb": 2048, "mem_total_mb": 8192}]},
+                            "zealtower": {"gpus": [{"util_pct": 7, "mem_used_mb": 512, "mem_total_mb": 6144}]},
+                        }
+                    }
+                }
+            }
+        }
+        self.assertIn("VEC GPU", gpu_summary(snapshot))
+        self.assertEqual(len(chunky_scroller("hyperbusiness", now=1, width=WIDTH)), WIDTH)
+        self.assertEqual(len(raster_bar(now=1, width=WIDTH)), WIDTH)
+        self.assertEqual(len(tunnel_line(now=1, width=WIDTH)), WIDTH)
+        self.assertEqual(len(demoscene_greetz(snapshot, now=1, width=WIDTH)), WIDTH)
+        self.assertEqual(len(motivational_line(snapshot, now=1, width=WIDTH)), WIDTH)
 
 
 if __name__ == "__main__":

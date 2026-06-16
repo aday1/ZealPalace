@@ -2,9 +2,20 @@
 """SIP call banner overlay for ZealPalace LCD (fed by CELES pbx-zealpalace-lcd-call.sh)."""
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 
 SIP_FLASH = Path.home() / '.cache' / 'zealot' / 'sip_call_flash.json'
+SIP_EVENT_MAX_AGE_SEC = 15 * 60
+
+
+def _parse_ts(value):
+    if not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
+    except ValueError:
+        return 0.0
 
 
 class SipCallFlash:
@@ -59,6 +70,11 @@ class SipCallFlash:
             return
         state = str(data.get('state') or '').lower()
         if state in ('', 'clear', 'idle', 'hangup', 'ended'):
+            self.clear()
+            return
+        event_ts = _parse_ts(data.get('ts'))
+        newest_ts = max(st.st_mtime, event_ts)
+        if newest_ts and time.time() - newest_ts > SIP_EVENT_MAX_AGE_SEC:
             self.clear()
             return
         from_ext = str(data.get('from_ext') or '?')

@@ -8,7 +8,9 @@ cache files, but it does not mutate bridge canon or place PBX actions.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import socket
 import threading
 import time
@@ -21,9 +23,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+try:
+    import psutil
+except Exception:  # pragma: no cover - optional dependency on development hosts
+    psutil = None
+
 
 CACHE = Path.home() / ".cache" / "zealot"
 RPG_DIR = CACHE / "rpg"
+LAN_TELEMETRY = CACHE / "lan_telemetry.json"
+LAN_TELEMETRY_SOURCES = CACHE / "lan_telemetry_sources.json"
 LOCAL_LOGS = (
     ("ZP", "#ZealPalace", CACHE / "irc.log"),
     ("RPG", "#RPG", CACHE / "rpg.log"),
@@ -48,6 +57,19 @@ CELES_LOG_API = "http://10.13.37.37:9104/recent.json"
 BRIDGE_STATE_URL = "http://127.0.0.1:8890/rpg/state"
 BRIDGE_HEALTH_URL = "http://127.0.0.1:8890/health"
 CELES_FRESH_SEC = 15 * 60
+REMOTE_TELEMETRY_FRESH_SEC = 10 * 60
+REMOTE_PULL_INTERVAL_SEC = 15
+
+METRIC_HISTORY: dict[str, deque[float]] = {
+    "cpu": deque(maxlen=32),
+    "mem": deque(maxlen=32),
+    "disk": deque(maxlen=32),
+    "rx": deque(maxlen=32),
+    "tx": deque(maxlen=32),
+}
+_NET_LAST: dict[str, float] = {}
+_REMOTE_LAST_PULL = 0.0
+_REMOTE_LAST_DATA: dict[str, Any] | None = None
 
 
 @dataclass
@@ -99,6 +121,253 @@ def read_json(path: Path, fallback: Any) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError):
         return fallback
+
+
+def _pct(used: float, total: float) -> float:
+    if total <= 0:
+        return 0.0
+    return max(0.0, min(100.0, (used / total) * 100.0))
+
+
+def _remember(key: str, value: float) -> list[float]:
+    row = METRIC_HISTORY.setdefault(key, deque(maxlen=32))
+    row.append(float(value))
+    return list(row)
+
+
+def _proc_mem_pct() -> float:
+    values: dict[str, float] = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, _, rest = line.partition(":")
+            values[key] = float(rest.strip().split()[0]) * 1024.0
+    except (OSError, ValueError, IndexError):
+        return 0.0
+    total = values.get("MemTotal", 0.0)
+    avail = values.get("MemAvailable", 0.0)
+    return _pct(total - avail, total)
+
+
+def _disk_row(path: str) -> dict[str, Any]:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return {"path": path, "ok": False, "pct": 0}
+    return {
+        "path": path,
+        "ok": True,
+        "total": usage.total,
+        "used": usage.used,
+        "free": usage.free,
+        "pct": round(_pct(usage.used, usage.total), 1),
+    }
+
+
+def _temperature_c() -> float | None:
+    if psutil is not None:
+        try:
+            temps = psutil.sensors_temperatures(fahrenheit=False)
+            for rows in temps.values():
+                for row in rows:
+                    current = getattr(row, "current", None)
+                    if current is not None:
+                        return round(float(current), 1)
+        except Exception:
+            pass
+    for path in ("/sys/class/thermal/thermal_zone0/temp",):
+        try:
+            return round(float(Path(path).read_text(encoding="utf-8").strip()) / 1000.0, 1)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _net_counters() -> tuple[int, int]:
+    if psutil is not None:
+        try:
+            counters = psutil.net_io_counters()
+            return int(counters.bytes_recv), int(counters.bytes_sent)
+        except Exception:
+            pass
+    rx = 0
+    tx = 0
+    try:
+        for line in Path("/proc/net/dev").read_text(encoding="utf-8").splitlines()[2:]:
+            iface, _, rest = line.partition(":")
+            if iface.strip() == "lo":
+                continue
+            parts = rest.split()
+            rx += int(parts[0])
+            tx += int(parts[8])
+    except (OSError, ValueError, IndexError):
+        pass
+    return rx, tx
+
+
+def local_system_stats() -> dict[str, Any]:
+    now = time.time()
+    if psutil is not None:
+        try:
+            cpu_pct = float(psutil.cpu_percent(interval=None))
+        except Exception:
+            cpu_pct = 0.0
+        try:
+            mem_pct = float(psutil.virtual_memory().percent)
+        except Exception:
+            mem_pct = _proc_mem_pct()
+    else:
+        cpu_pct = 0.0
+        mem_pct = _proc_mem_pct()
+
+    load = os.getloadavg() if hasattr(os, "getloadavg") else (0.0, 0.0, 0.0)
+    root_disk = _disk_row("/")
+    home_disk = _disk_row(str(Path.home()))
+    rx, tx = _net_counters()
+    last_ts = _NET_LAST.get("ts", now)
+    elapsed = max(0.2, now - last_ts)
+    rx_rate = max(0.0, (rx - _NET_LAST.get("rx", rx)) / elapsed)
+    tx_rate = max(0.0, (tx - _NET_LAST.get("tx", tx)) / elapsed)
+    _NET_LAST.update({"ts": now, "rx": float(rx), "tx": float(tx)})
+
+    return {
+        "ok": True,
+        "host": socket.gethostname(),
+        "cpu_pct": round(cpu_pct, 1),
+        "load1": round(float(load[0]), 2),
+        "load5": round(float(load[1]), 2),
+        "load15": round(float(load[2]), 2),
+        "mem_pct": round(mem_pct, 1),
+        "temp_c": _temperature_c(),
+        "disks": [root_disk, home_disk],
+        "root_disk_pct": root_disk.get("pct", 0),
+        "net": {
+            "rx_bps": int(rx_rate),
+            "tx_bps": int(tx_rate),
+        },
+        "history": {
+            "cpu": _remember("cpu", cpu_pct),
+            "mem": _remember("mem", mem_pct),
+            "disk": _remember("disk", float(root_disk.get("pct") or 0)),
+            "rx": _remember("rx", min(100.0, rx_rate / 1024.0 / 30.0)),
+            "tx": _remember("tx", min(100.0, tx_rate / 1024.0 / 30.0)),
+        },
+    }
+
+
+def telemetry_source_token(source: dict[str, Any]) -> str:
+    token = str(source.get("token") or "")
+    if token:
+        return token
+    token_file = source.get("token_file") or source.get("tokenFile")
+    if token_file:
+        try:
+            return Path(str(token_file)).read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+    return ""
+
+
+def fetch_telemetry_source(source: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str]:
+    name = short_text(source.get("name") or source.get("url") or "remote", 32)
+    url = str(source.get("url") or "")
+    if not url:
+        return name, None, "missing url"
+    headers = {}
+    token = telemetry_source_token(source)
+    if token:
+        headers["X-Zeal-Telemetry-Token"] = token
+    try:
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(request, timeout=float(source.get("timeout", 0.8))) as response:
+            data = response.read(192 * 1024)
+        parsed = json.loads(data.decode("utf-8", "replace"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError) as exc:
+        return name, None, str(exc)[:160]
+    if not isinstance(parsed, dict) or not parsed.get("ok"):
+        return name, None, "invalid telemetry response"
+    parsed["host"] = name
+    parsed.setdefault("name", name)
+    return name, parsed, ""
+
+
+def cache_telemetry() -> dict[str, Any]:
+    data = read_json(LAN_TELEMETRY, {})
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "invalid telemetry cache", "hosts": {}}
+    generated = data.get("generated_ts")
+    try:
+        age = int(time.time() - float(generated))
+    except (TypeError, ValueError):
+        age = 999999
+    hosts = data.get("hosts") if isinstance(data.get("hosts"), dict) else {}
+    return {
+        "ok": bool(hosts),
+        "fresh": bool(hosts) and age <= REMOTE_TELEMETRY_FRESH_SEC,
+        "age_sec": age if hosts else None,
+        "generated_at": data.get("generated_at", ""),
+        "hosts": hosts,
+        "source": data.get("source", ""),
+    }
+
+
+def pull_remote_telemetry() -> dict[str, Any] | None:
+    sources_doc = read_json(LAN_TELEMETRY_SOURCES, {})
+    sources = sources_doc.get("sources") if isinstance(sources_doc, dict) else None
+    if not isinstance(sources, list) or not sources:
+        return None
+
+    cache = cache_telemetry()
+    cache_hosts = cache.get("hosts") if isinstance(cache.get("hosts"), dict) else {}
+    hosts = dict(cache_hosts)
+    errors: dict[str, str] = {}
+    pulled = 0
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        name, data, error = fetch_telemetry_source(source)
+        if data:
+            hosts[name] = data
+            pulled += 1
+        elif error:
+            errors[name] = error
+
+    now = time.time()
+    if pulled:
+        payload = {
+            "generated_at": now_iso(),
+            "generated_ts": int(now),
+            "source": "json-pull",
+            "hosts": hosts,
+        }
+        try:
+            LAN_TELEMETRY.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+        return {
+            "ok": True,
+            "fresh": True,
+            "age_sec": 0,
+            "generated_at": payload["generated_at"],
+            "hosts": hosts,
+            "source": "json-pull",
+            "errors": errors,
+        }
+    if cache.get("ok"):
+        cache["errors"] = errors
+        return cache
+    return {"ok": False, "fresh": False, "hosts": {}, "errors": errors}
+
+
+def remote_telemetry() -> dict[str, Any]:
+    global _REMOTE_LAST_DATA, _REMOTE_LAST_PULL
+    now = time.time()
+    if _REMOTE_LAST_DATA is not None and now - _REMOTE_LAST_PULL < REMOTE_PULL_INTERVAL_SEC:
+        return _REMOTE_LAST_DATA
+    pulled = pull_remote_telemetry()
+    data = pulled if pulled is not None else cache_telemetry()
+    _REMOTE_LAST_DATA = data
+    _REMOTE_LAST_PULL = now
+    return data
 
 
 def fetch_json(url: str, timeout: float = 1.2) -> tuple[Any | None, str]:
@@ -547,11 +816,16 @@ def parse_irc_protocol_line(line: str) -> LcdEvent | None:
 
 
 def status_files() -> dict[str, Any]:
+    telemetry = {
+        "local": local_system_stats(),
+        "remote": remote_telemetry(),
+    }
     return {
         "noc": read_json(CACHE / "noc_mesh.json", {}),
         "pbx_phones": read_json(CACHE / "pbx_phones.json", {}),
         "navi": read_json(CACHE / "navi_ticker.json", {}),
         "lcd_heartbeat": read_heartbeat(),
+        "telemetry": telemetry,
         "vector_ok": tcp_ok("10.13.37.60", 11434),
         "hermes_ok": tcp_ok("10.13.37.60", 8090),
         "pbx_api_ok": tcp_ok("10.13.37.37", 9101),
