@@ -11,6 +11,7 @@ from zealot_lcd_render import (
     bar,
     calendar_line,
     chunky_scroller,
+    compact_bar,
     comet_line,
     demoscene_greetz,
     event_lines,
@@ -22,9 +23,11 @@ from zealot_lcd_render import (
     panel_lines,
     raster_bar,
     render_text_frame,
+    rgb_quote,
     spark,
     sparkle_line,
     tunnel_line,
+    transition_text,
 )
 from zealot_sip_flash import SipCallFlash
 
@@ -53,6 +56,13 @@ class LcdRenderTests(unittest.TestCase):
         for row, _style in event_lines(event, WIDTH):
             self.assertLessEqual(len(row), WIDTH)
 
+    def test_event_lines_wrap_overflow_without_animation_fill(self):
+        event = LcdEvent("RPG", "#RPG", "LongNick", "alpha " * 80, canon="queued")
+        rows = event_lines(event, WIDTH)
+        self.assertGreater(len(rows), 1)
+        self.assertTrue(any(row.rstrip().endswith("~") for row, _style in rows))
+        self.assertTrue(all("_-=" not in row for row, _style in rows))
+
     def test_frame_is_fixed_size(self):
         snapshot = {
             "events": [LcdEvent("RPG", "#RPG", "DM", "hello", sort_ts=1)],
@@ -68,13 +78,17 @@ class LcdRenderTests(unittest.TestCase):
     def test_flourish_lines_fit_width(self):
         self.assertEqual(len(comet_line("ZEAL", now=1, width=WIDTH)), WIDTH)
         self.assertEqual(len(sparkle_line(now=1, width=WIDTH)), WIDTH)
-        for mode in ("terrarium", "uptime", "ops", "rpg", "agents", "bridge", "lounge"):
+        for mode in ("terrarium", "uptime", "ops", "rpg", "rgb", "agents", "bridge", "lounge"):
             for row in mode_art(mode, now=1, width=WIDTH):
                 self.assertEqual(len(row), WIDTH)
 
     def test_graph_helpers_are_fixed_width(self):
         self.assertEqual(len(bar(55, width=8)), 10)
+        self.assertIn("█", bar(55, width=8))
+        self.assertEqual(len(compact_bar(55, width=6)), 6)
         self.assertEqual(len(spark([0, 25, 50, 75, 100], width=12)), 12)
+        self.assertIn("█", spark([100], width=1))
+        self.assertEqual(transition_text("stable text", now=0, row=0, width=WIDTH), "stable text".ljust(WIDTH))
 
     def test_demoscene_helpers_fit_width(self):
         snapshot = {
@@ -136,6 +150,17 @@ class LcdRenderTests(unittest.TestCase):
         rows = panel_lines(snapshot, "uptime", WIDTH)
         self.assertEqual(fmt_uptime(90061), "1d01h")
         self.assertTrue(any("ztwr up 14d03h" in row for row, _style in rows))
+        self.assertTrue(all(len(row) <= WIDTH for row, _style in rows))
+
+    def test_rgb_panel_and_quote_fit_width(self):
+        snapshot = {
+            "bridge": {"hot_zone": "Crystal Mesh", "era": "2026-06-15-end-of-day-2026-06-16"},
+            "status": {"vector_ok": True, "pbx_api_ok": True},
+        }
+        rows = panel_lines(snapshot, "rgb", WIDTH)
+        self.assertEqual(rgb_quote(0), rgb_quote(29 * 60))
+        self.assertTrue(any("RGB BATTLE" in row for row, _style in rows))
+        self.assertTrue(any("QOTD" in row for row, _style in rows))
         self.assertTrue(all(len(row) <= WIDTH for row, _style in rows))
 
     def test_calendar_line_includes_week_countdowns(self):

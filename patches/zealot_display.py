@@ -36,7 +36,6 @@ from zealot_lcd_render import (
     sparkle_line,
     ticker_text,
     tunnel_line,
-    transition_text,
 )
 
 try:
@@ -150,6 +149,9 @@ def attr_for(style: str, bold: bool = False, now: float | None = None, row: int 
         pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
     elif style == "MOTIVE":
         pair = PAIR_MOTIVE if int((now or 0) // 2) % 2 else PAIR_RPG
+    elif style == "RGB":
+        cycle = (PAIR_BAD, PAIR_RPG, PAIR_NOC, PAIR_ST, PAIR_TICKER)
+        pair = cycle[int((now or 0) * 2 + row) % len(cycle)]
     else:
         pair = {
         "RPG": PAIR_RPG,
@@ -167,7 +169,7 @@ def attr_for(style: str, bold: bool = False, now: float | None = None, row: int 
     attr = curses.color_pair(pair)
     if style == "SYS":
         attr |= curses.A_DIM
-    if style in ("GLINT", "BANNER", "GREETZ", "MOTIVE"):
+    if style in ("GLINT", "BANNER", "GREETZ", "MOTIVE", "RGB"):
         attr |= curses.A_BOLD
     if style == "RASTER" and int((now or 0) * 2 + row) % 3 == 0:
         attr |= curses.A_REVERSE
@@ -284,7 +286,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, sip_flash=None) -> 
         row += 1
 
     for idx, (text, style) in enumerate(panel_lines(snapshot, mode, WIDTH)):
-        add_line(stdscr, row, transition_text(text, now, idx, WIDTH), style, bold=(idx == 0), raw=True, now=now)
+        add_line(stdscr, row, text, style, bold=(idx == 0), raw=True, now=now)
         row += 1
 
     add_line(stdscr, row, calendar_line(now, WIDTH), "SYS", raw=True, now=now)
@@ -305,7 +307,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, sip_flash=None) -> 
     rows = rows[-event_slots:]
     start = row + max(0, event_slots - len(rows))
     for idx, (text, style) in enumerate(rows):
-        add_line(stdscr, start + idx, transition_text(text, now, idx + 20, WIDTH), style, raw=True, now=now)
+        add_line(stdscr, start + idx, text, style, raw=True, now=now)
 
     add_line(stdscr, input_row, "> " + input_buf[-(WIDTH - 3) :], "INPUT", bold=True, now=now)
     stdscr.refresh()

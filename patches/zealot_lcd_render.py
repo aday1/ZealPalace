@@ -104,6 +104,42 @@ PSEUDOCORP_MOTIVATORS = (
     "Executive presence is just uptime with better lighting.",
 )
 
+RGB_QOTD = (
+    "Red holds the line, Green repairs the route, Blue names the target.",
+    "The RGB battle is won when signal, care, and clarity arrive together.",
+    "A clean packet is a promise: send it once, verify it twice.",
+    "When the lights split red/green/blue, choose the channel that helps.",
+    "Lore is operational memory with better stage lighting.",
+    "Blue watches the horizon, Green tends the mesh, Red keeps the gate.",
+)
+
+RGB_BATTLE_FRAMES = (
+    (
+        "   R-AXIOM     G-MENDER     B-LUX   ",
+        "    /|\\         /|\\         /|\\     ",
+        "   / | \\--==[ CRYSTAL BUS ]==--/\\   ",
+        " red holds  green heals  blue sees  ",
+    ),
+    (
+        " R>>>>>      G[[[+]]]      <<<<<B   ",
+        "  shield       patch        prism    ",
+        "  [RED]---packet oath---[BLUE]       ",
+        "        GREEN signs the route        ",
+    ),
+    (
+        "      .---- RGB BATTLE MAP ----.     ",
+        " RED: gate  GREEN: mesh  BLUE: sky   ",
+        "      '--- lore packets armed ---'   ",
+        "        next turn: synchronize       ",
+    ),
+    (
+        " RED CAPTAIN  GREEN OPS  BLUE ORACLE ",
+        "    <== fire   <== fix   <== focus   ",
+        "        [ ZEAL PALACE SIGNAL ]       ",
+        "         courage / repair / read     ",
+    ),
+)
+
 
 def stable_pick(rows: tuple[str, ...], now: float, period: int = 11, salt: str = "") -> str:
     if not rows:
@@ -167,18 +203,23 @@ def motivational_line(snapshot: dict[str, Any], now: float, width: int = WIDTH) 
     return fit("CEO MODE: " + text, width)
 
 
+def rgb_quote(now: float | None = None) -> str:
+    ts = time.time() if now is None else now
+    return stable_pick(RGB_QOTD, ts, period=30 * 60, salt="rgb-qotd")
+
+
 MODE_ART: dict[str, tuple[str, ...]] = {
     "ops": (
-        "   .---- NOC ----.    .-- PBX --.  ",
-        "---| WAN LAN CE |----| 100-199 |--",
-        "   '------------'    '---------'   ",
-        "      packets, phones, watchdogs   ",
+        " .-- NOC BUS --.==. PBX PATCH .--. ",
+        " | wan lan ce  |  | 100-199   |  | ",
+        " '--watchdogs--'=='--ringmesh--'--' ",
+        "       routes, phones, pulses       ",
     ),
     "terrarium": (
-        "     .------------------------.     ",
-        "    / LAN TERRARIUM: live NOC /     ",
-        "   / cpu mem disk gpu packets /     ",
-        "  '-------------------------'       ",
+        " .---------- LAN TERRARIUM --------.",
+        " | cpu  mem  disk  gpu  packets   |",
+        " | roots in cache, leaves in logs |",
+        " '----------- live NOC ------------'",
     ),
     "uptime": (
         "      .---- BOOT AGE GRID ----.     ",
@@ -187,28 +228,34 @@ MODE_ART: dict[str, tuple[str, ...]] = {
         "      '---- no reboot kabuki --'    ",
     ),
     "rpg": (
-        "        /\\      CRYSTAL MESH       ",
-        "   /\\  /  \\ /\\   RPG CANON         ",
-        "  /  \\/____\\/ \\  IRC + BRIDGE      ",
-        "      | [] |      quests live       ",
+        "       /\\       CRYSTAL MESH       ",
+        "  /\\  /  \\ /\\    RGB torches       ",
+        " /  \\/____\\/ \\   IRC + bridge      ",
+        "    [__][][__]   quests live       ",
+    ),
+    "rgb": (
+        "      .---- RGB BATTLE ----.        ",
+        " red captain / green ops / blue eye ",
+        " signal blades over crystal mesh    ",
+        "      '--- qotd every 30m ---'      ",
     ),
     "agents": (
-        " [111]--[117]--[122]--[128]       ",
-        "    \\        PBX LAN        /      ",
-        " [690]--CRYSTAL MESH--[698]       ",
-        "      agents talking in-band       ",
+        " [111]--[117]--[122]--[128]        ",
+        "    \\__ PBX LAN BUS /__/           ",
+        " [690]--CRYSTAL MESH--[698]        ",
+        "       agents talking in-band       ",
     ),
     "bridge": (
-        " SillyTavern <====> ZealPalace     ",
-        " cards/worlds ---> RPG state       ",
-        " IRC #RPG <-----> bridge feed      ",
-        "      co-canon display surface     ",
+        " SillyTavern <====> ZealPalace      ",
+        " cards/worlds ---> RPG state        ",
+        " IRC #RPG <-----> bridge feed       ",
+        "       co-canon display surface     ",
     ),
     "lounge": (
-        " .------------------------------.  ",
+        " .--------- LIVE CHATTER --------.  ",
         " | ZealHangs / Palace / RPG     |  ",
-        " '------ live chatter bus ------'  ",
-        "      scrollback with stage lights ",
+        " '-- scrollback with stage lights-' ",
+        "      the room hums, logs answer    ",
     ),
 }
 
@@ -238,7 +285,10 @@ def comet_line(label: str, now: float, width: int = WIDTH) -> str:
 
 
 def mode_art(mode: str, now: float, width: int = WIDTH) -> list[str]:
-    rows = list(MODE_ART.get(mode, MODE_ART["lounge"]))
+    if mode == "rgb":
+        rows = list(RGB_BATTLE_FRAMES[int(now // 2) % len(RGB_BATTLE_FRAMES)])
+    else:
+        rows = list(MODE_ART.get(mode, MODE_ART["lounge"]))
     glint = "<>" if int(now * 2) % 2 else "[]"
     if rows:
         rows[0] = glint[0] + rows[0][1 : max(1, width - 1)] + glint[1]
@@ -246,15 +296,7 @@ def mode_art(mode: str, now: float, width: int = WIDTH) -> list[str]:
 
 
 def transition_text(text: Any, now: float, row: int, width: int = WIDTH, window: float = 2.25) -> str:
-    clean = fit(text, width)
-    phase = now % 9
-    if phase >= window:
-        return clean
-    reveal = max(0, min(width, int(width * (phase / window))))
-    fill = raster_bar(now + row * 0.19, width).replace("#", "=")
-    if reveal <= 0:
-        return fill
-    return pad(clean[:reveal] + fill[reveal:], width)
+    return fit(text, width)
 
 
 def bar(value: Any, width: int = 10) -> str:
@@ -263,7 +305,16 @@ def bar(value: Any, width: int = 10) -> str:
     except (TypeError, ValueError):
         pct = 0.0
     filled = int(round((pct / 100.0) * width))
-    return "[" + "#" * filled + "." * (width - filled) + "]"
+    return "▕" + "█" * filled + "░" * (width - filled) + "▏"
+
+
+def compact_bar(value: Any, width: int = 6) -> str:
+    try:
+        pct = max(0.0, min(100.0, float(value)))
+    except (TypeError, ValueError):
+        pct = 0.0
+    filled = int(round((pct / 100.0) * width))
+    return "█" * filled + "░" * (width - filled)
 
 
 def spark(values: Any, width: int = 14) -> str:
@@ -275,12 +326,12 @@ def spark(values: Any, width: int = 14) -> str:
             rows.append(max(0.0, min(100.0, float(item))))
         except (TypeError, ValueError):
             rows.append(0.0)
-    levels = " .:-=+*#%@"
+    levels = "▁▂▃▄▅▆▇█"
     out = []
     for value in rows:
         idx = int((value / 100.0) * (len(levels) - 1))
         out.append(levels[idx])
-    return ("." * max(0, width - len(out)) + "".join(out))[-width:]
+    return ("▁" * max(0, width - len(out)) + "".join(out))[-width:]
 
 
 def fmt_pct(value: Any) -> str:
@@ -347,12 +398,16 @@ def wrap_line(text: str, width: int = WIDTH, max_lines: int = 3) -> list[str]:
     clean = re.sub(r"\s+", " ", text or "").strip()
     if not clean:
         return [""]
-    return textwrap.wrap(
+    chunks = textwrap.wrap(
         clean,
         width=width,
         break_long_words=True,
         break_on_hyphens=False,
-    )[:max_lines] or [clean[:width]]
+    ) or [clean[:width]]
+    if len(chunks) > max_lines:
+        chunks = chunks[:max_lines]
+        chunks[-1] = fit(chunks[-1], width).rstrip()[: max(0, width - 1)] + "~"
+    return chunks
 
 
 def event_label(event: LcdEvent) -> str:
@@ -400,7 +455,7 @@ def newest(events: list[LcdEvent], source: str | None = None, n: int = 3) -> lis
     return sorted(rows, key=lambda event: event.sort_ts)[-n:]
 
 
-def mode_name(now: float, modes: tuple[str, ...] = ("terrarium", "uptime", "ops", "rpg", "agents", "bridge", "lounge")) -> str:
+def mode_name(now: float, modes: tuple[str, ...] = ("terrarium", "uptime", "ops", "rpg", "rgb", "agents", "bridge", "lounge")) -> str:
     return modes[int(now // 6) % len(modes)]
 
 
@@ -469,6 +524,8 @@ def panel_lines(snapshot: dict[str, Any], mode: str, width: int = WIDTH) -> list
         return ops_panel(status, snapshot, width)
     if mode == "rpg":
         return rpg_panel(bridge, width)
+    if mode == "rgb":
+        return rgb_battle_panel(snapshot, width)
     if mode == "agents":
         return agents_panel(bridge, status, width)
     if mode == "bridge":
@@ -502,7 +559,7 @@ def terrarium_panel(status: dict[str, Any], snapshot: dict[str, Any], width: int
         (fit("TERRARIUM / LAN VITALS", width), "NOC"),
         (fit(f"zeal cpu {fmt_pct(local.get('cpu_pct'))} {bar(local.get('cpu_pct'), 8)} mem {fmt_pct(local.get('mem_pct'))}", width), "NOC"),
         (fit("cpu " + spark(hist.get("cpu"), 16) + " mem " + spark(hist.get("mem"), 10), width), "NOC"),
-        (fit(f"disk / {fmt_pct(root_pct)} {bar(root_pct, 8)} home {fmt_pct(home_pct)}", width), "NOC"),
+        (fit(f"disk / {fmt_pct(root_pct)} {bar(root_pct, 8)} home {fmt_pct(home_pct)} {compact_bar(home_pct, 4)}", width), "NOC"),
         (fit(f"net rx {fmt_bps(net.get('rx_bps'))} tx {fmt_bps(net.get('tx_bps'))} temp {local.get('temp_c') or '?'}C", width), "NOC"),
         (fit(f"lan hosts {up_count}/{total_count or '?'} up alert {alert_text}", width), "NOC"),
     ]
@@ -520,7 +577,7 @@ def terrarium_panel(status: dict[str, Any], snapshot: dict[str, Any], width: int
         gpu_text = "g?"
         if gpu:
             gpu_text = f"g{fmt_pct(gpu.get('util_pct'))} m{gpu.get('mem_used_mb', '?')}/{gpu.get('mem_total_mb', '?')} t{gpu.get('temp_c', '?')}C"
-        rows.append((fit(f"{label} cpu {fmt_pct(host.get('cpu_pct'))} disk {fmt_pct(disk_pct)} {gpu_text}", width), "ST" if name == "zealtower" else "RPG"))
+        rows.append((fit(f"{label} cpu {fmt_pct(host.get('cpu_pct'))} d{fmt_pct(disk_pct)} {compact_bar(disk_pct, 5)} {gpu_text}", width), "ST" if name == "zealtower" else "RPG"))
 
     age = remote.get("age_sec")
     if age is not None:
@@ -567,7 +624,7 @@ def uptime_panel(status: dict[str, Any], width: int) -> list[tuple[str, str]]:
         rows.append(
             (
                 fit(
-                    f"{label} load {host.get('load1', '?')}/{host.get('load5', '?')} mem {fmt_pct(host.get('mem_pct'))} disk {fmt_pct(disk_pct)}",
+                    f"{label} load {host.get('load1', '?')}/{host.get('load5', '?')} mem {fmt_pct(host.get('mem_pct'))} d{fmt_pct(disk_pct)} {compact_bar(disk_pct, 5)}",
                     width,
                 ),
                 style,
@@ -633,6 +690,34 @@ def rpg_panel(bridge: dict[str, Any], width: int) -> list[tuple[str, str]]:
         (fit("Co-canon: IRC + bridge pulses", width), "ST"),
         (fit("Real actions still need confirm", width), "ST"),
     ]
+
+
+def rgb_battle_panel(snapshot: dict[str, Any], width: int) -> list[tuple[str, str]]:
+    bridge = as_dict(snapshot.get("bridge"))
+    status = as_dict(snapshot.get("status"))
+    quote_rows = wrap_line(rgb_quote(), width - 6, max_lines=2)
+    zone = short_text(bridge.get("hot_zone") or "Crystal Mesh", 18)
+    era = str(bridge.get("era") or "pre-meteor").replace("2026-06-15-end-of-day-", "eod-")
+    vec = "online" if status.get("vector_ok") else "offline"
+    pbx = "online" if status.get("pbx_api_ok") else "offline"
+    rows: list[tuple[str, str]] = [
+        (fit("RGB BATTLE / LORE QOTD", width), "RGB"),
+        (fit("QOTD " + quote_rows[0], width), "RGB"),
+    ]
+    if len(quote_rows) > 1:
+        rows.append((fit("     " + quote_rows[1], width), "RGB"))
+    rows.extend(
+        [
+            (fit("RED Captain: hold the gate", width), "PBX"),
+            (fit("GREEN Ops: repair the route", width), "NOC"),
+            (fit("BLUE Oracle: focus the signal", width), "RPG"),
+            (fit(f"zone {zone} era {short_text(era, 14)}", width), "ST"),
+            (fit(f"turn objective: VEC {vec} PBX {pbx}", width), "NOC"),
+        ]
+    )
+    while len(rows) < 8:
+        rows.append((fit("story packet waiting for next tick", width), "SYS"))
+    return rows[:8]
 
 
 def agents_panel(bridge: dict[str, Any], status: dict[str, Any], width: int) -> list[tuple[str, str]]:
@@ -710,7 +795,7 @@ def render_text_frame(snapshot: dict[str, Any], now: float | None = None) -> lis
     rows.append(demoscene_greetz(snapshot, ts, WIDTH))
     rows.append(chunky_scroller(ticker_text(snapshot) + " // " + gpu_summary(snapshot), ts, WIDTH, speed=3.0))
     rows.extend(mode_art(mode, ts, WIDTH))
-    rows.extend(transition_text(line, ts, idx, WIDTH) for idx, (line, _style) in enumerate(panel_lines(snapshot, mode, WIDTH)))
+    rows.extend(line for line, _style in panel_lines(snapshot, mode, WIDTH))
     rows.append(calendar_line(ts, WIDTH))
     rows.append(motivational_line(snapshot, ts, WIDTH))
     rows.append(marquee(banner_text(snapshot), WIDTH, 10, ts))
