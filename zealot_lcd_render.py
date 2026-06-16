@@ -82,7 +82,9 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0617c"
+LCD_TICKER_VERSION = "tkr0617d"
+WORK_OPEN_HOUR = 10
+WORK_CLOSE_HOUR = 17
 AGENT_CALL_FRESH_SEC = 2 * 3600
 AGENT_TICKER_SHOW_SEC = 25 * 60
 AGENT_TICKER_IDLE_RE = re.compile(
@@ -256,13 +258,74 @@ def calendar_line(now: float | None = None, width: int = WIDTH) -> str:
     dt = datetime.fromtimestamp(ts)
     month = MONTH_NAMES[max(0, min(11, dt.month - 1))]
     iso_week = max(1, min(52, int(dt.isocalendar().week)))
-    weeks_left = max(0, 52 - iso_week)
-    week_start = (dt - timedelta(days=dt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    next_week = week_start + timedelta(days=7)
-    seconds_left = max(0, int((next_week - dt).total_seconds()))
-    weekbeats_left = max(0, min(9999, int(round(seconds_left / (7 * 86400) * 10000))))
-    text = f"{dt:%a} {dt.day:02d} {month} W{iso_week:02d}/52 Y-{weeks_left:02d}w WK{fmt_duration_short(seconds_left)} WB{weekbeats_left:04d}"
+    text = f"{dt:%a} {dt.day:02d} {month} W{iso_week:02d}/52"
     return fit(text, width)
+
+
+def _weekly_milestones(dt: datetime) -> tuple[datetime, datetime, datetime]:
+    """Work Mon 10:00, work Fri 17:00, and the Mon 10:00 that ends the weekend phase."""
+    mon0 = (dt - timedelta(days=dt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    this_mon_10 = mon0.replace(hour=WORK_OPEN_HOUR, minute=0, second=0, microsecond=0)
+    this_fri_17 = mon0 + timedelta(days=4, hours=WORK_CLOSE_HOUR)
+    next_mon_10 = mon0 + timedelta(days=7, hours=WORK_OPEN_HOUR)
+    if dt.weekday() == 0 and dt < this_mon_10:
+        prev_mon0 = mon0 - timedelta(days=7)
+        return (
+            prev_mon0.replace(hour=WORK_OPEN_HOUR, minute=0, second=0, microsecond=0),
+            prev_mon0 + timedelta(days=4, hours=WORK_CLOSE_HOUR),
+            this_mon_10,
+        )
+    return this_mon_10, this_fri_17, next_mon_10
+
+
+def work_week_phase(dt: datetime) -> str:
+    mon_10, fri_17, next_mon_10 = _weekly_milestones(dt)
+    if mon_10 <= dt < fri_17:
+        return "work"
+    return "weekend"
+
+
+def _span_pct(start: datetime, end: datetime, dt: datetime) -> float:
+    total = (end - start).total_seconds()
+    if total <= 0:
+        return 0.0
+    elapsed = (dt - start).total_seconds()
+    return max(0.0, min(100.0, (elapsed / total) * 100.0))
+
+
+def work_week_countdown_line(now: float | None = None, width: int = WIDTH) -> str:
+    """Row 0: work-week progress toward Friday 5PM (weeklybeats window)."""
+    ts = time.time() if now is None else now
+    dt = datetime.fromtimestamp(ts)
+    mon_10, fri_17, _next_mon_10 = _weekly_milestones(dt)
+    bar_w = 8
+    if work_week_phase(dt) == "work":
+        pct = _span_pct(mon_10, fri_17, dt)
+        left = max(0, int((fri_17 - dt).total_seconds()))
+        text = f"WK {ascii_bar(pct, bar_w)} {int(round(pct)):2d}% FRI {fmt_duration_short(left)}"
+    else:
+        text = f"WK {ascii_bar(100, bar_w)} DONE"
+    return fit(text, width)
+
+
+def weekend_monday_countdown_line(now: float | None = None, width: int = WIDTH) -> str:
+    """Row 1: weekend progress toward Monday 10AM (quiet during work week)."""
+    ts = time.time() if now is None else now
+    dt = datetime.fromtimestamp(ts)
+    mon_10, fri_17, next_mon_10 = _weekly_milestones(dt)
+    bar_w = 8
+    left = max(0, int((next_mon_10 - dt).total_seconds()))
+    if work_week_phase(dt) == "work":
+        text = f"MON {ascii_bar(0, bar_w)} MON {fmt_duration_short(left)}"
+    else:
+        pct = _span_pct(fri_17, next_mon_10, dt)
+        text = f"MON {ascii_bar(pct, bar_w)} {int(round(pct)):2d}% MON {fmt_duration_short(left)}"
+    return fit(text, width)
+
+
+def compact_mode_rotator(mode: str, now: float, width: int = 8) -> str:
+    tag = mode_tab_short(mode)[:4]
+    return fit(f"|{tag}{mode_seconds_left(now):02d}s", width)
 
 
 def tick_counter(now: float | None = None) -> int:
@@ -991,16 +1054,18 @@ def compact_status_line(
     tick: int,
     width: int = WIDTH,
 ) -> str:
-    """Epoch clock + WOPR DEFCON on one centered row when space allows."""
+    """Epoch clock + WOPR DEFCON + compact mode rotator when space allows."""
+    rot = compact_mode_rotator(mode, now)
     clock = dashboard_header(snapshot, mode, now, tick, width).strip()
     defcon = joshua_defcon_ticker().strip()
-    combo = f"{clock}  {defcon}"
-    if len(combo) <= width:
-        return center(combo, width)
-    short_defcon = defcon.replace("STANDBY", "SBY").replace("DEFCON", "D")
-    combo = f"{clock}  {short_defcon}"
-    if len(combo) <= width:
-        return center(combo, width)
+    for combo in (
+        f"{clock}  {defcon}{rot}",
+        f"{clock}  {defcon.replace('STANDBY', 'SBY').replace('DEFCON', 'D')}{rot}",
+        f"{clock}{rot}",
+        clock,
+    ):
+        if len(combo) <= width:
+            return center(combo, width)
     return dashboard_header(snapshot, mode, now, tick, width)
 
 

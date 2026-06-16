@@ -31,6 +31,9 @@ from zealot_lcd_render import (
     pbx_agent_roster,
     bar,
     calendar_line,
+    work_week_countdown_line,
+    work_week_phase,
+    weekend_monday_countdown_line,
     chunky_scroller,
     compact_bar,
     comet_line,
@@ -233,16 +236,49 @@ class LcdRenderTests(unittest.TestCase):
         self.assertTrue(any("QOTD" in row for row, _style in rows))
         self.assertTrue(all(len(row) <= WIDTH for row, _style in rows))
 
-    def test_calendar_line_includes_week_countdowns(self):
+    def test_calendar_line_shows_date_and_iso_week(self):
         now = datetime(2026, 6, 16, 12, 0).timestamp()
         row = calendar_line(now, WIDTH)
         self.assertEqual(len(row), WIDTH)
         self.assertIn("Jun", row)
         self.assertIn("W25/52", row)
-        self.assertIn("Y-27w", row)
-        self.assertIn("WK", row)
-        self.assertIn("WB", row)
+        self.assertNotIn("WB", row)
         self.assertEqual(fmt_duration_short(5 * 86400 + 3 * 3600), "5d03h")
+
+
+class WeeklyCountdownTests(unittest.TestCase):
+    def test_work_week_line_midweek(self):
+        now = datetime(2026, 6, 17, 12, 0).timestamp()
+        self.assertEqual(work_week_phase(datetime.fromtimestamp(now)), "work")
+        row = work_week_countdown_line(now, WIDTH)
+        self.assertEqual(len(row), WIDTH)
+        self.assertIn("WK", row)
+        self.assertIn("FRI", row)
+        self.assertIn("[", row)
+        self.assertNotIn("DONE", row)
+
+    def test_weekend_line_midweek_mon_countdown(self):
+        now = datetime(2026, 6, 17, 12, 0).timestamp()
+        row = weekend_monday_countdown_line(now, WIDTH)
+        self.assertEqual(len(row), WIDTH)
+        self.assertIn("MON", row)
+        self.assertNotIn("#", row.split("MON", 1)[-1][:12])
+
+    def test_weekend_phase_saturday(self):
+        now = datetime(2026, 6, 20, 12, 0).timestamp()
+        self.assertEqual(work_week_phase(datetime.fromtimestamp(now)), "weekend")
+        wk = work_week_countdown_line(now, WIDTH)
+        mon = weekend_monday_countdown_line(now, WIDTH)
+        self.assertEqual(len(wk), WIDTH)
+        self.assertEqual(len(mon), WIDTH)
+        self.assertIn("DONE", wk)
+        self.assertIn("[#", mon)
+
+    def test_monday_pre_open_edge(self):
+        now = datetime(2026, 6, 15, 9, 0).timestamp()
+        self.assertEqual(work_week_phase(datetime.fromtimestamp(now)), "weekend")
+        wk = work_week_countdown_line(now, WIDTH)
+        self.assertIn("DONE", wk)
 
 
 class ModeBarTests(unittest.TestCase):

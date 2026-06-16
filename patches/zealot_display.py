@@ -26,20 +26,19 @@ from zealot_lcd_render import (
     anim_now,
     calendar_line,
     chunky_scroller,
-    comet_line,
     dashboard_footer_segments,
     event_segments,
     fit,
     gpu_summary,
-    header_title,
     lcd_status_line,
     agents_art_live,
     mode_art_compact,
     mode_name,
-    mode_section_bar,
     pad,
     panel_lines,
     ticker_text,
+    weekend_monday_countdown_line,
+    work_week_countdown_line,
 )
 
 try:
@@ -430,12 +429,13 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     panel_mode = "agents" if sip_active else mode
     zones = lcd_frame_zones(frame_h)
 
-    # --- Header (3 rows): title, epoch+WOPR, mesh ticker ---
+    # --- Header (3 rows): weekly countdown, epoch+WOPR, mesh ticker ---
     add_line(
         stdscr,
         zones["header_start"],
-        comet_line(header_title(snapshot, panel_mode).strip(), now),
-        "GLINT",
+        work_week_countdown_line(now, frame_w),
+        "CYAN",
+        bold=True,
         raw=True,
         now=now,
     )
@@ -463,8 +463,16 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         now=now,
     )
 
-    # --- Mode rotator with slide countdown ---
-    add_line(stdscr, zones["mode_bar"], mode_section_bar(mode, frame_w, now), "CYAN", bold=True, raw=True, now=now)
+    # --- Weekend / Monday 10AM weekly phase row ---
+    add_line(
+        stdscr,
+        zones["mode_bar"],
+        weekend_monday_countdown_line(now, frame_w),
+        "SYS",
+        bold=True,
+        raw=True,
+        now=now,
+    )
 
     # --- Compact centered ASCII art (2 rows) ---
     if panel_mode == "agents":
