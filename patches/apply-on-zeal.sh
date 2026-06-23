@@ -28,7 +28,7 @@ print("  merged soul.json")
 PY
 fi
 
-sudo systemctl restart zealot-bot zealot-rpg zealot-hangs 2>/dev/null || true
+sudo systemctl restart zealot-bot zealot-rpg zealot-hangs zealot-terrarium.timer 2>/dev/null || true
 
 for f in zealot_display.py lcd-init zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py \
          zealot_lcd_feeds.py zealot_lcd_render.py zealot_navi_ticker.py zealot_wopr_lcd.py joshua_wopr_menu.py zealot_pbx_pull.py lcd_tmux_bar.py zealot_display_loop.sh; do

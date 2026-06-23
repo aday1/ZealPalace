@@ -2158,19 +2158,27 @@ def event_lines(
     event: LcdEvent,
     width: int = WIDTH,
     now: float | None = None,
+    max_body_lines: int = 2,
 ) -> list[tuple[str, str]]:
-    if now is not None:
-        return [(fit("".join(text for text, _style in event_segments(event, width, now)), width), event.source)]
-
     head = event_head(event)
     body = re.sub(r"\s+", " ", str(event.text or "")).strip()
     room = max(6, width - len(head))
     body = short_text(body, 400)
-    chunks = wrap_line(body, room, max_lines=3)
+    chunks = wrap_line(body, room, max_lines=max_body_lines)
+    if not chunks:
+        chunks = [""]
     out: list[tuple[str, str]] = []
     out.append((fit(head + chunks[0], width), event.source))
-    for chunk in chunks[1:]:
-        out.append((fit(" " * len(head) + chunk, width), event.source))
+    indent = " " * min(len(head), width - 1)
+    joined = " ".join(chunks)
+    for idx, chunk in enumerate(chunks[1:], start=1):
+        line_body = chunk
+        if idx == len(chunks) - 1 and now is not None and len(joined) > room * max_body_lines:
+            used = sum(len(c) + (1 if i else 0) for i, c in enumerate(chunks[:-1]))
+            remainder = body[used:].strip() if used < len(body) else ""
+            if len(remainder) > room:
+                line_body = marquee(remainder, room, speed=IRC_SCROLL_SPEED, now=now)
+        out.append((fit(indent + line_body, width), event.source))
     return out
 
 

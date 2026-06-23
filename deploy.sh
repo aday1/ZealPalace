@@ -54,7 +54,7 @@ echo "  Done."
 echo "[5/10] Deploying scripts..."
 for script in zealot_bot.py zealot_display.py boot_plasma.py zealot_blog.py \
              zealot_rpg.py zealot_hangs.py zealot_web_api.py zealot_admin.py \
-             zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py \
+             zealot_terrarium.py zealot_world_pulse.py zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py \
              zealot_lcd_feeds.py zealot_lcd_render.py zealot_navi_ticker.py zealot_wopr_lcd.py \
              joshua_wopr_menu.py zealot_pbx_pull.py lcd_tmux_bar.py zealot_display_loop.sh \
              lcd-init lcd-boot; do
@@ -66,6 +66,9 @@ done
 # Deploy soul.json to cache dir if not already present
 if [ -f "$DEPLOY_DIR/soul.json" ] && [ ! -f "$CACHE_DIR/soul.json" ]; then
     cp "$DEPLOY_DIR/soul.json" "$CACHE_DIR/soul.json"
+fi
+if [ -f "$DEPLOY_DIR/crystal-mesh-party.json" ]; then
+    cp "$DEPLOY_DIR/crystal-mesh-party.json" "$CACHE_DIR/crystal-mesh-party.json"
 fi
 echo "  Done."
 
@@ -124,14 +127,14 @@ echo "  Done."
 echo "[9/10] Setting up systemd services..."
 for svcfile in zealot-bot.service zealot-blog.service zealot-blog.timer \
                zealot-rpg.service zealot-hangs.service zealot-web-api.service \
-               zealot-admin.service; do
+               zealot-admin.service zealot-terrarium.service zealot-terrarium.timer; do
     if [ -f "$DEPLOY_DIR/$svcfile" ]; then
         sudo cp "$DEPLOY_DIR/$svcfile" /etc/systemd/system/"$svcfile"
     fi
 done
 sudo systemctl daemon-reload
 for svc in ngircd nginx zealot-bot zealot-rpg zealot-hangs zealot-web-api \
-           zealot-admin zealot-blog.timer; do
+           zealot-admin zealot-blog.timer zealot-terrarium.timer; do
     sudo systemctl enable "$svc" 2>/dev/null || true
 done
 echo "  Done."
@@ -154,7 +157,7 @@ echo "  Done."
 echo ""
 echo "=== VERIFICATION ==="
 for svc in ngircd nginx zealot-bot zealot-rpg zealot-hangs zealot-web-api \
-           zealot-admin zealot-blog.timer; do
+           zealot-admin zealot-blog.timer zealot-terrarium.timer; do
     printf '  %-18s %s\n' "$svc:" "$(sudo systemctl is-active $svc)"
 done
 

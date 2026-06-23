@@ -627,16 +627,21 @@ class Brain:
                     if nick.lower() != 'zealot' and self.msg_budget > 0:
                         irc_log('***', f'{nick} has joined {CHANNEL}')
                         time.sleep(2)
-                        greet = self._generate('ego',
+                        greet = self._generate(
+                            'ego',
                             f'{nick} joined the channel. Acknowledge them briefly.',
-                            f'hey {nick}.')
+                            fallback=None,
+                            maxn=30,
+                        )
+                        if not greet:
+                            continue
                         self.ego.say(CHANNEL, greet)
                         irc_log('Zealot', greet)
                         self.msg_budget -= 1
                 except: pass
 
-    def _generate(self, persona, prompt, fallback, temp=0.9, maxn=60):
-        """Generate text via Ollama with fallback. Uses soul.json for config."""
+    def _generate(self, persona, prompt, fallback=None, temp=0.9, maxn=60):
+        """Generate text via Ollama. Returns None when offline (no canned filler)."""
         # God mode override
         gm = self.soul.get('god_mode', {})
         if gm.get('enabled') and gm.get('override_prompt'):
@@ -664,11 +669,12 @@ class Brain:
             self.mem.d['ollama_ok'] = True
             self.mem.d['ollama_fails'] = 0
             return result
-        else:
-            err_detail = result[1] if isinstance(result, tuple) else 'empty response'
-            self.mem.d['ollama_ok'] = False
-            self.mem.d['ollama_fails'] = self.mem.d.get('ollama_fails',0) + 1
-            return f'{fallback} [ollama: {err_detail}]'
+        err_detail = result[1] if isinstance(result, tuple) else 'empty response'
+        self.mem.d['ollama_ok'] = False
+        self.mem.d['ollama_fails'] = self.mem.d.get('ollama_fails', 0) + 1
+        if fallback is None:
+            return None
+        return fallback
 
     def _respond(self, nick, msg):
         """Always respond to user messages"""
@@ -682,8 +688,10 @@ class Brain:
             f'You\'ve been thinking about: "{stage["t"]}". '
             f'{nick} said: "{msg}". Respond naturally, briefly. Be friendly.'
         )
-        fb = f'...processing that. Give me a sec, {nick}.'
-        resp = self._generate(persona, prompt, fb)
+        fb = '...processing that. Give me a sec, mate.'
+        resp = self._generate(persona, prompt, fb, maxn=45)
+        if not resp:
+            return
         time.sleep(random.uniform(1, 3))
         self.ego.say(CHANNEL, resp)
         irc_log('Zealot', resp)
@@ -701,16 +709,9 @@ class Brain:
             'Say something self-aware about waiting for humans on IRC.',
             'One quirky observation about uptime, load, or SD card weather.',
         ]
-        fb_lines = [
-            'still here. channel hum sounds like a fan curve.',
-            're-checked /proc. everything suspiciously nominal.',
-            'the logs scroll on. I scroll with them.',
-            'anyone lurking? no worries if not — I can yap solo.',
-            f'mood is {self.mood}. reckon the mesh is breathing.',
-            'idle thought: every ping is a tiny hello.',
-            'I just narrated my own RAM usage. felt poetic.',
-        ]
-        resp = self._generate(persona, random.choice(prompts), random.choice(fb_lines), maxn=45)
+        resp = self._generate(persona, random.choice(prompts), fallback=None, maxn=45)
+        if not resp:
+            return
         self.ego.say(CHANNEL, resp)
         irc_log('Zealot', resp)
         self.mem.d['last_resp'] = resp
@@ -729,15 +730,9 @@ class Brain:
             f'One quiet thought about existing as code on a tiny computer.',
             f'Something small caught your attention today. What was it?',
         ]
-        fb_lines = [
-            '...huh.',
-            'the uptime counter keeps going. not sure why that matters to me.',
-            'another day on the SD card.',
-            'day {}. still here.',
-            'load average is interesting today.',
-        ]
-        fb = random.choice(fb_lines).format(random.randint(42, 999))
-        resp = self._generate(persona, random.choice(prompts), fb)
+        resp = self._generate(persona, random.choice(prompts), fallback=None)
+        if not resp:
+            return
         self.ego.say(CHANNEL, resp)
         irc_log('Zealot', resp)
         self.mem.d['last_resp'] = resp

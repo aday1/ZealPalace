@@ -108,13 +108,14 @@ class LcdRenderTests(unittest.TestCase):
         self.assertTrue(any(row.rstrip().endswith("~") for row, _style in rows))
         self.assertTrue(all("_-=" not in row for row, _style in rows))
 
-    def test_event_lines_scroll_long_irc_without_truncation_marker(self):
+    def test_event_lines_scroll_long_irc_uses_wrap_or_marquee(self):
         event = LcdEvent("ZP", "#ZealPalace", "Zealot", "alpha " * 80, canon="irc")
-        rows = event_lines(event, WIDTH, now=12.5)
-        self.assertEqual(len(rows), 1)
-        self.assertLessEqual(len(rows[0][0]), WIDTH)
-        self.assertNotIn("...", rows[0][0])
-        self.assertIn("alpha", rows[0][0])
+        rows = event_lines(event, WIDTH, now=12.5, max_body_lines=2)
+        self.assertGreaterEqual(len(rows), 1)
+        self.assertLessEqual(len(rows), 2)
+        joined = " ".join(row for row, _style in rows)
+        self.assertIn("alpha", joined)
+        self.assertTrue(all(len(row) <= WIDTH for row, _style in rows))
 
     def test_frame_is_fixed_size(self):
         snapshot = {

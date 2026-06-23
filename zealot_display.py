@@ -28,6 +28,7 @@ from zealot_lcd_render import (
     chunky_scroller,
     dashboard_footer_segments,
     event_segments,
+    event_lines,
     fit,
     gpu_summary,
     lcd_status_line,
@@ -509,18 +510,19 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
 
     # --- Events zone (reserved rows, tail-pinned, colored segments) ---
     add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
-    event_slot_rows: list[list[tuple[str, str]]] = []
+    event_slot_rows: list[tuple[str, str]] = []
     for event in snapshot.get("events") or []:
         if event_is_recurring_noise(event):
             continue
-        event_slot_rows.append(event_segments(event, frame_w, now=now))
+        for row_text, row_style in event_lines(event, frame_w, now=now, max_body_lines=2):
+            event_slot_rows.append((row_text, row_style))
     event_slots = max(1, zones["events_end"] - zones["events_start"])
     event_slot_rows = event_slot_rows[-event_slots:]
-    for idx, segments in enumerate(event_slot_rows):
+    for idx, (text, style) in enumerate(event_slot_rows):
         row = zones["events_start"] + idx
         if row >= zones["events_end"]:
             break
-        add_segment_line(stdscr, row, segments, now=now)
+        add_line(stdscr, row, text, style, raw=True, now=now)
 
     if input_buf:
         input_text = fit("> " + input_buf[-(frame_w - 3) :], frame_w)

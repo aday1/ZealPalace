@@ -11,6 +11,7 @@ ExecStart=/usr/bin/python3 /home/aday/.local/bin/zealot_rpg.py
 Restart=on-failure
 RestartSec=10
 Environment=TERM=linux
+Environment=OLLAMA_HOST=http://10.13.37.60:11434
 WorkingDirectory=/home/aday
 
 [Install]

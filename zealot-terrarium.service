@@ -1,0 +1,13 @@
+[Unit]
+Description=ZealPalace terrarium heartbeat (lore, souls, GM pulse)
+After=network.target zealot-rpg.service
+
+[Service]
+Type=oneshot
+User=aday
+Environment=PYTHONUNBUFFERED=1
+Environment=OLLAMA_HOST=http://10.13.37.60:11434
+ExecStart=/usr/bin/python3 /home/aday/.local/bin/zealot_terrarium.py
+
+[Install]
+WantedBy=multi-user.target

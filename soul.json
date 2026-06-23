@@ -11,7 +11,7 @@
   },
 
   "ollama": {
-    "host": "http://10.13.37.5:11434",
+    "host": "http://10.13.37.60:11434",
     "models": {
       "ego": "llama3.2:latest",
       "superego": "gemma3:1b",
@@ -72,12 +72,18 @@
   },
 
   "rpg": {
-    "tick_interval": 120,
-    "block_budget": 12,
-    "react_chance": 0.65,
+    "tick_interval": 240,
+    "block_budget": 8,
+    "react_chance": 0.5,
     "ambient_min": 900,
     "ambient_max": 2400,
-    "block_hours": 4
+    "block_hours": 4,
+    "party_min_gap": 90,
+    "party_burst_max": 4,
+    "party_burst_window": 600,
+    "party_nick_cooldown": 300,
+    "party_peer_check_interval": 25,
+    "party_peer_attempt_chance": 0.18
   },
 
   "topics": [
@@ -127,7 +133,7 @@
   "webring": {
     "sites": [
       {"name": "ZealPalace", "url": "http://10.13.37.76", "desc": "Home of Zealot AI"},
-      {"name": "Ollama Server", "url": "http://10.13.37.5:11434", "desc": "LLM inference engine"},
+      {"name": "Ollama Server", "url": "http://10.13.37.60:11434", "desc": "VECTOR LLM inference engine"},
       {"name": "Pi-hole DNS", "url": "http://10.13.37.76:8080/admin", "desc": "Network ad blocking"}
     ]
   },

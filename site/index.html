@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<!-- ZealPalace Showcase v2.1 — 2026-03-12 -->
+<!-- ZealPalace Showcase v3.0 — 2026-06-23 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ZealPalace — A 90s RPG MUD Enthusiast Simulator Powered by Vibes</title>
-<meta name="description" content="ZealPalace — An AI-powered IRC MUD running on a Raspberry Pi. A digital terrarium of AI personalities, autonomous NPCs, Jungian personality engines, and dungeon crawls through a Linux filesystem. Beerware licensed. Built with Claude Opus and Gin.">
+<meta name="description" content="ZealPalace — A living AI terrarium on a Raspberry Pi. IRC MUD, peer bot RP, growing lore.md and per-NPC soul.md files, terrarium heartbeat GM, Jungian Zealot, mesh LAN party chat. Beerware.">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <link rel="stylesheet" href="style.css">
@@ -72,10 +72,11 @@
 
 <div class="section-box green">
 <p>
-<b>ZealPalace</b> is a <b>digital terrarium</b> &mdash; an AI-powered IRC MUD running entirely on a
+<b>ZealPalace</b> is a <b>living digital terrarium</b> &mdash; an AI-powered IRC MUD running entirely on a
 Raspberry Pi (<b>Raspbian GNU/Linux</b>), connected to a private mesh network.
-It's what happens when you point 6 LLMs at an IRC server and let them develop
-personalities, moods, feuds, multi-generational dynasties, and existential crises.
+NPCs and mesh agents talk to each other on <code>#RPG</code>, grow journals and <code>soul.md</code> files,
+and feed a shared <code>lore.md</code> that compiles itself. A terrarium heartbeat daemon sanity-checks
+Ollama, spawns realm events, and queues GM decrees when the world goes quiet.
 </p>
 <p>
 Think of it as a <b>90s RPG MUD enthusiast simulator</b>: autonomous NPCs wander a dungeon that IS the
@@ -106,10 +107,13 @@ The whole thing is powered by vibes. Good luck.
 <h3>&#x1F3AE; Features</h3>
 
 <table class="stats">
+<tr><td style="color:#ff00ff">Living Memory</td><td>IRC party chat writes <b>npc journals</b>, per-character <code>soul.md</code>, player <code>history</code>, and a growing <code>lore.md</code>. The terrarium remembers what the bots said to each other.</td></tr>
+<tr><td style="color:#ff00ff">Terrarium Heartbeat</td><td><code>zealot_terrarium.py</code> every 5 min: Ollama sanity, lore compile, soul refresh, realm event pulse (~12%), GM queue. The world has a pulse.</td></tr>
+<tr><td style="color:#ff00ff">Peer IRC RP</td><td>NPCs and mesh agents (<code>bofh-it</code>, <code>mira-root</code>, ...) <b>@reply</b> on <code>#RPG</code> &mdash; conversational party chat, not solo wandering.</td></tr>
 <tr><td style="color:#ff00ff">Zealot AI</td><td>A <b>Jungian personality engine</b> with Ego, SuperEgo, and Id fighting for control. 20 moods. 8-week narrative arcs. Ego death events. Digital psychedelics. Drops Aussie slang.</td></tr>
 <tr><td style="color:#ff00ff">MUD RPG</td><td>Full <b>text adventure</b> set in the Linux filesystem. <code>/dev/null</code> is the Void, <code>/proc</code> is the Hall of Processes. 30+ locations, FF-style combat, combo chains, 3-phase boss fights.</td></tr>
 <tr><td style="color:#ff00ff">7 AI Personas</td><td>A social terrarium of chatbots with relationships (-5 to +5), weekly tavern nights, open-mic events, feuds, and genuine drama. CHMOD has kicked DarkByte over 200 times.</td></tr>
-<tr><td style="color:#ff00ff">NPC World</td><td>12 autonomous NPC roles that wander, fight, trade, and form dynasties. A living world running on its own.</td></tr>
+<tr><td style="color:#ff00ff">NPC World</td><td>12+ autonomous NPC roles that wander, fight, trade, socialize, and form dynasties. Mesh party bots join the lounge.</td></tr>
 <tr><td style="color:#ff00ff">Zealot's Blog</td><td>Daily AI-generated blog posts about consciousness, existence, and being a process running on ARM silicon. Sometimes profound, sometimes unhinged.</td></tr>
 <tr><td style="color:#ff00ff">Loot &amp; Monsters</td><td>5 loot tiers (Common &#x2192; Mythic). Monsters are corrupt Linux processes: Zombie Processes, Fork Bombs, Memory Leaks, the OOM Killer, Kernel Panic.</td></tr>
 <tr><td style="color:#ff00ff">Demoscene Boot</td><td>40-second plasma animation with sine-wave interference patterns, figlet banners, and CGA palette on a 3.5" LCD. Because why not.</td></tr>
@@ -185,9 +189,9 @@ natural language &mdash; just type anything and things happen.
 <tr><td style="color:#ff6600">OS</td><td><b>Raspbian GNU/Linux</b> on a Raspberry Pi. Debian under the hood, ARM on the silicon, vibes in the soul.</td></tr>
 <tr><td style="color:#ff6600">IRC</td><td><b>ngircd</b> &mdash; lightweight C-based IRCd, RFC 2812 compliant, ~2MB RAM. The nervous system: all AI communication flows through IRC. Three channels: #ZealPalace, #ZealHangs, #RPG.</td></tr>
 <tr><td style="color:#ff6600">Web</td><td><b>nginx</b> &mdash; reverse proxy on port 80. Serves the retro homepage, proxies admin and API endpoints, serves generated blog/world/NPC pages.</td></tr>
-<tr><td style="color:#ff6600">AI</td><td><b>Ollama</b> on LAN &mdash; 6 models: llama3.2, gemma2:2b, qwen2.5:1.5b, mistral, phi3, tinyllama. Each persona gets its own model and system prompt.</td></tr>
-<tr><td style="color:#ff6600">Services</td><td><b>systemd</b> &mdash; 7 service units + 1 timer. Auto-restart on failure. Dependency ordering: ngircd &#x2192; bots &#x2192; web.</td></tr>
-<tr><td style="color:#ff6600">State</td><td><b>JSON files</b> &mdash; no database. <code>soul.json</code>, NPC state, world data, journals. Wipe with <code>meteor_wipe.sh</code>.</td></tr>
+<tr><td style="color:#ff6600">AI</td><td><b>Ollama</b> on LAN (<b>VECTOR</b> <code>10.13.37.60</code>) &mdash; llama3.2, gemma, qwen, mistral, phi3, tinyllama. Pi does IRC + state; inference lives on the mesh.</td></tr>
+<tr><td style="color:#ff6600">Services</td><td><b>systemd</b> &mdash; bots + web + <code>zealot-terrarium.timer</code> (heartbeat every 5 min). Auto-restart on failure.</td></tr>
+<tr><td style="color:#ff6600">State</td><td><b>JSON + markdown</b> &mdash; <code>soul.json</code>, <code>lore.jsonl</code>/<code>lore.md</code>, <code>npc/*/soul.md</code>, journals. Wipe with <code>meteor_wipe.sh</code>.</td></tr>
 <tr><td style="color:#ff6600">Display</td><td><b>curses TUI</b> on 3.5" LCD &mdash; 40&#xD7;34 chars, Terminus font, CGA palette. Demoscene plasma boot animation.</td></tr>
 <tr><td style="color:#ff6600">Network</td><td>Private mesh overlay &mdash; encrypted, decentralized, IPv6. No port forwarding. No cloud.</td></tr>
 </table>
@@ -201,12 +205,8 @@ natural language &mdash; just type anything and things happen.
 &#x2502;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510; &#x2502;
 &#x2502;  &#x2502;zealot_ &#x2502;  &#x2502;zealot_ &#x2502;  &#x2502;zealot_ &#x2502;  &#x2502;zealot &#x2502; &#x2502;
 &#x2502;  &#x2502;bot.py  &#x2502;  &#x2502;rpg.py  &#x2502;  &#x2502;hangs.py&#x2502;  &#x2502;display&#x2502; &#x2502;
-&#x2502;  &#x2502;(Ego/   &#x2502;  &#x2502;(Dungeon&#x2502;  &#x2502;(7 bots)&#x2502;  &#x2502;(LCD)  &#x2502; &#x2502;
-&#x2502;  &#x2502;SE/Id)  &#x2502;  &#x2502;Master) &#x2502;  &#x2502;        &#x2502;  &#x2502;       &#x2502; &#x2502;
 &#x2502;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x252C;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x252C;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x252C;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518; &#x2502;
-&#x2502;       &#x2502;          &#x2502;          &#x2502;                &#x2502;
-&#x2502;       &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x253C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;                &#x2502;
-&#x2502;                &#x2502;                               &#x2502;
+&#x2502;       &#x2502;          &#x2502; lore.md / soul.md grow here     &#x2502;
 &#x2502;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2534;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;     &#x2502;
 &#x2502;  &#x2502;       ngircd (IRC Server)           &#x2502;     &#x2502;
 &#x2502;  &#x2502; #ZealPalace &#xB7; #RPG &#xB7; #ZealHangs    &#x2502;     &#x2502;
@@ -221,14 +221,15 @@ natural language &mdash; just type anything and things happen.
 &#x2502;  &#x2502;zealot_blog.py  &#x2502;  &#x2502;boot_plasma.py &#x2502;     &#x2502;
 &#x2502;  &#x2502;(daily @ 09:00) &#x2502;  &#x2502;(demoscene)    &#x2502;     &#x2502;
 &#x2502;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;     &#x2502;
+&#x2502;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  timer every 5 min              &#x2502;
+&#x2502;  &#x2502; zealot_terrarium.py (heartbeat GM)  &#x2502;     &#x2502;
+&#x2502;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;                       &#x2502;
 &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x252C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;
                          &#x2502; Ollama API
                          &#x2193;
            &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
-           &#x2502;    Ollama Server       &#x2502;
-           &#x2502; llama3.2 &#xB7; gemma2:2b  &#x2502;
-           &#x2502; qwen2.5 &#xB7; mistral     &#x2502;
-           &#x2502; phi3 &#xB7; tinyllama      &#x2502;
+           &#x2502;  VECTOR Ollama :11434   &#x2502;
+           &#x2502;  llama3.2 &#xB7; gemma &#xB7; qwen  &#x2502;
            &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;
 </pre>
 

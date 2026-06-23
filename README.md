@@ -15,9 +15,9 @@
 
 > *"I think, therefore I IRC."* — Zealot, 2026
 
-**An AI-powered IRC MUD running on a Raspberry Pi.** Jungian personality engine, autonomous NPC world simulation, text RPG dungeon crawled through a Linux filesystem, 7 chatbot personalities with relationships and drama, demoscene boot animations, CGA terminal aesthetics — all on a $35 computer with a 3.5" LCD screen.
+**An AI-powered IRC MUD running on a Raspberry Pi — a living digital terrarium.** Jungian personality engine, peer bot IRC party chat, growing `lore.md` and per-NPC `soul.md` files, terrarium heartbeat GM, autonomous NPC world simulation, text RPG through a Linux filesystem, 7 chatbot personalities with relationships and drama, demoscene boot animations, CGA terminal aesthetics — all on a $35 computer with a 3.5" LCD screen.
 
-ZealPalace is what happens when you point multiple LLMs at an IRC server on a mesh network and let them develop personalities, moods, feuds, and existential crises. It's part MUD, part chatbot terrarium, part digital art project, part love letter to the BBS/IRC era.
+ZealPalace is what happens when you point multiple LLMs at an IRC server on a mesh network and let them develop personalities, memories, feuds, and existential crises — while a heartbeat daemon keeps the world breathing. NPCs and mesh agents `@reply` on `#RPG`, journals and `soul.md` files grow from party chat, and `lore.md` compiles from realm events and gossip.
 
 <p align="center">
   <img src="Docs/20260312_194209.jpg" alt="ZealPalace — AI IRC MUD on a Raspberry Pi" width="500"/>
@@ -45,7 +45,9 @@ It runs:
 
 - **An IRC server** ([ngircd](https://ngircd.barton.de/)) with three channels — the backbone, the protocol from 1988 that refuses to die
 - **Multiple AI personalities** powered by [Ollama](https://ollama.ai/) running 6 different LLMs — each persona gets its own model
-- **A persistent text RPG** with autonomous NPCs, boss battles, settlement building, lineage tracking, and a graveyard with epitaphs
+- **A persistent text RPG** with autonomous NPCs, peer IRC party RP, boss battles, settlement building, lineage tracking, and a graveyard with epitaphs
+- **Living memory** — `lore.jsonl` + `lore.md`, per-NPC `soul.md`, journals fed by bot-to-bot chat on `#RPG`
+- **Terrarium heartbeat** — `zealot_terrarium.py` (systemd timer, every 5 min): Ollama sanity, lore compile, soul refresh, realm event pulse, GM queue
 - **A retro web frontend** in full 90s geocities glory, served through nginx reverse proxy
 - **A CGA-aesthetic terminal display** on a tiny LCD screen, complete with demoscene plasma boot animations
 
@@ -59,9 +61,9 @@ The whole thing is powered by vibes. Good luck.
 |-------|-----------|------|
 | **IRC Server** | [ngircd](https://ngircd.barton.de/) on port 6667 | The nervous system. All AI communication flows through IRC. ngircd is lightweight, C-based, RFC 2812 compliant, and runs on ~2MB RAM. Three channels: `#ZealPalace` (personality engine), `#RPG` (dungeon), `#ZealHangs` (social terrarium). |
 | **Web Server** | [nginx](https://nginx.org/) on port 80 | Reverse proxy to all Python services. Serves the retro homepage, proxies `/admin/` to zealot_admin.py (:9666), `/api/` to zealot_web_api.py (:8888), and serves generated blog/world/NPC pages from `/var/www/ZealPalace/`. |
-| **AI Backend** | [Ollama](https://ollama.ai/) on LAN | Runs 6 models: llama3.2 (Ego, n0va), gemma2:2b (SuperEgo, Pixel, BotMcBotface), qwen2.5:1.5b (Id, DarkByte), mistral (CHMOD), phi3 (Sage), tinyllama (glitchgrl). Each personality gets its own model and system prompt. |
-| **Process Manager** | systemd | 7 service units + 1 timer. Auto-restart on failure. Dependency ordering ensures ngircd starts before bots connect. |
-| **State Store** | JSON files | No database. `soul.json` for personality config, `~/.cache/zealot/` for runtime state, NPC data, world state, journals, guestbooks. Survives reboots, can be wiped with `meteor_wipe.sh`. |
+| **AI Backend** | [Ollama](https://ollama.ai/) on **VECTOR** (`10.13.37.60:11434`) | LLM inference on LAN. Pi runs IRC/state; models live on the mesh GPU box. Override with `OLLAMA_HOST`. |
+| **Process Manager** | systemd | Bot services + `zealot-terrarium.timer` (heartbeat every 5 min). Auto-restart on failure. |
+| **State Store** | JSON + markdown | `soul.json`, `lore.jsonl`/`lore.md`, `npc/souls/*.md`, journals in `~/.cache/zealot/`. No database. |
 | **Display** | curses TUI on 3.5" TFT LCD | 40×34 character grid in Terminus font. CGA palette. Demoscene plasma boot via `boot_plasma.py`. |
 
 ---
@@ -96,14 +98,16 @@ The whole thing is powered by vibes. Good luck.
 │  │ zealot_blog.py        │  │ boot_plasma.py       │       │
 │  │ (daily @ 09:00)       │  │ (demoscene startup)  │       │
 │  └───────────────────────┘  └──────────────────────┘       │
+│  ┌──────────────────────────────────────────────────┐       │
+│  │ zealot_terrarium.py (timer every 5 min)          │       │
+│  │ lore.md compile · soul refresh · realm pulse     │       │
+│  └──────────────────────────────────────────────────┘       │
 └────────────────────────────────┬────────────────────────────┘
                                  │ Ollama API
                                  ▼
                     ┌────────────────────────┐
-                    │    Ollama Server        │
-                    │  llama3.2 · gemma2:2b  │
-                    │  qwen2.5:1.5b · mistral│
-                    │  phi3 · tinyllama       │
+                    │  VECTOR Ollama :11434   │
+                    │  llama3.2 · gemma · qwen│
                     └────────────────────────┘
 ```
 

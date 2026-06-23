@@ -15,12 +15,15 @@ Commands (said as normal chat messages, DM parses them):
 
 Saves persistent state per-player in ~/.cache/zealot/rpg/
 """
-import socket, time, json, random, os, sys, signal, traceback
+import socket, time, json, random, os, sys, signal, traceback, re
 import urllib.request, urllib.error
 from pathlib import Path
 from datetime import datetime, date
 
-OLLAMA = os.environ.get('OLLAMA_HOST', 'http://10.13.37.5:11434')
+OLLAMA = os.environ.get('OLLAMA_HOST', 'http://10.13.37.60:11434')
+GROK_API = os.environ.get('GROK_API_URL', 'https://api.x.ai/v1/chat/completions')
+GROK_API_KEY = os.environ.get('XAI_API_KEY') or os.environ.get('GROK_API_KEY', '')
+GROK_MODEL = os.environ.get('GROK_MODEL', 'grok-3-mini')
 IRC_HOST = '127.0.0.1'
 IRC_PORT = 6667
 CHANNEL = '#RPG'
@@ -43,6 +46,9 @@ BLOG_DIR = Path('/var/www/ZealPalace/blog')
 SETTLEMENT_FILE = RPG_DIR / 'settlements.json'
 WORLD_WEB_DIR = Path('/var/www/ZealPalace/world')
 LORE_FILE = RPG_DIR / 'lore.jsonl'
+LORE_MD_FILE = RPG_DIR / 'lore.md'
+NPC_SOUL_DIR = NPC_DIR / 'souls'
+
 WEATHER_FILE = RPG_DIR / 'weather.json'
 REALM_EVENT_FILE = RPG_DIR / 'realm_event.json'
 GM_QUEUE_FILE = DIR / 'gm_queue.json'
@@ -59,6 +65,54 @@ EXISTENTIAL_REFUSAL_CHANCE = 0.12  # 12% chance NPC refuses to fight at all
 PARTY_RECRUIT_CHANCE = 0.35  # 35% chance to recruit allies for monster fight
 
 # Diversified realm entry messages
+# Mesh agents on #RPG — loaded from crystal-mesh-party.json at boot
+CRYSTAL_MESH_PARTY = []
+CRYSTAL_MESH_PARTY_NICKS = []
+
+JOIN_IGNORE_NICKS = frozenset({
+    'lcd-ticker', 'lcd_ticker', 'lcd-probe', 'celes-pbx', 'zeallog', 'rpgbot',
+    'dungeonmaster', 'hermes-warden', 'joshua-wopr', 'grok-paranoid',
+})
+
+def _mesh_party_nicks():
+    nicks = set()
+    try:
+        for row in CRYSTAL_MESH_PARTY:
+            if isinstance(row, dict):
+                for key in ('irc_nick', 'short'):
+                    val = str(row.get(key) or '').strip()
+                    if val:
+                        nicks.add(val.lower())
+    except Exception:
+        pass
+    return nicks
+
+def join_announce_is_ignored(nick, npcs=None):
+    base = nick.rstrip('_').lower()
+    if base in JOIN_IGNORE_NICKS:
+        return True
+    if base in _mesh_party_nicks():
+        return True
+    if npcs:
+        if npcs.is_npc(nick):
+            return True
+        if nick in npcs.conns or nick.rstrip('_') in npcs.conns:
+            return True
+        if nick in getattr(npcs, 'npc_nicks', set()):
+            return True
+    try:
+        personas = globals().get('NPC_PERSONAS') or {}
+        key = nick.rstrip('_')
+        if key in personas or nick in personas:
+            return True
+    except Exception:
+        pass
+    if '-' in base and base not in ('yomiko_', 'holybell'):
+        if load_player(nick) or load_player(base):
+            return False
+        return True
+    return False
+
 ENTRY_MESSAGES = [
     '{nick} materializes from a shower of fragmented packets.',
     '{nick} steps through a flickering portal, trailing data echoes.',
@@ -1087,6 +1141,7 @@ def rebuild_world_pages():
     _build_timeline_page()
     _build_leaderboard_page()
     _build_lore_page()
+    compile_lore_md()
     _build_family_tree_page()
 
 def _html_escape(s):
@@ -2614,6 +2669,7 @@ _FEATURED_NPC_DIRS = [
 
 def ensure_npc_blog_dirs():
     """Create blog directories for all NPCs and web directories at boot"""
+    _ensure_crystal_mesh_party()
     for d in [TAVERN_DIR, CULT_DIR, WORLD_WEB_DIR]:
         d.mkdir(parents=True, exist_ok=True)
     for nick in list(NPC_PERSONAS) + _FEATURED_NPC_DIRS:
@@ -2688,27 +2744,27 @@ def gen_battle_narration(context, style='attack', maxn=50):
         return None
 
 
-def gen_existential_quip(nick, context=''):
-    """Generate an existential mid-battle thought via Ollama. Fallback to static."""
+def gen_existential_quip(nick, context='', persona=None):
+    """Generate an existential mid-battle thought — generative only."""
     prompt = (
         f'{nick} is in battle ({context}). They pause and have a brief existential thought — '
-        f'why do they fight? What is the realm? Are they real? Is the monster also suffering? '
+        f'why do they fight? What is the realm? Are they real? '
         f'1 SHORT haunting sentence from {nick}\'s inner voice. No action, just thought.'
     )
-    try:
-        d = json.dumps({
-            'model': DM_MODEL, 'prompt': prompt,
-            'system': 'You voice the inner thoughts of warriors questioning their existence in a cyberpunk realm. Brief, poetic, unsettling.',
-            'stream': False, 'options': {'temperature': 1.2, 'num_predict': 60}
-        }).encode()
-        req = urllib.request.Request(f'{OLLAMA}/api/generate', data=d,
-              headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=6) as r:
-            txt = json.loads(r.read()).get('response', '').strip().strip('"\'')
-            return txt[:300] if txt else None
-    except:
-        pass
-    return random.choice(EXISTENTIAL_QUIP_FALLBACK)
+    if persona:
+        return npc_gen(prompt, persona, maxn=60)
+    txt = _llm_ollama(
+        prompt,
+        'You voice warriors questioning existence in a cyberpunk realm. Brief, poetic.',
+        DM_MODEL, maxn=60, temperature=1.1, timeout=10,
+    )
+    if not txt:
+        txt = _llm_grok(
+            prompt,
+            'You voice warriors questioning existence in a cyberpunk realm. Brief, poetic.',
+            maxn=60,
+        )
+    return txt
 
 EXISTENTIAL_QUIP_FALLBACK = [
     'Are we fighting because we must, or because we were written to?',
@@ -2873,26 +2929,161 @@ def load_lore(limit=50):
 
 def gen_npc_diary_ollama(nick, persona, recent_events):
     """Generate a diary entry for an NPC based on recent events. Returns string or None."""
-    events_str = '; '.join(recent_events[-5:]) if recent_events else 'nothing notable happened recently'
+    ctx_bits = []
+    for e in npc_read_journal(nick, 10):
+        ctx_bits.append(f'{e.get("type", "?")}: {e.get("text", "")[:100]}')
+    if recent_events:
+        ctx_bits.extend(str(x)[:100] for x in recent_events[-5:])
+    ctx = '; '.join(ctx_bits[-8:]) or 'quiet day on the mesh'
     prompt = (
-        f'Write a short personal diary entry (3-5 sentences) as {nick} the {persona.get("role", "adventurer")}. '
-        f'Reflect on recent events: {events_str}. '
-        f'First person, in-character. Show personality and emotion.'
+        f'Write a short personal blog diary (2-4 sentences) as {nick}. '
+        f'Recent life: {ctx}. First person, in-character. Realm and party lore only — '
+        f'no homelab host inventory lists.'
     )
+    return blog_gen(prompt, persona, maxn=160)
+
+
+def _load_blog_publish_state() -> dict:
     try:
-        d = json.dumps({
-            'model': persona['model'],
-            'system': persona['system'],
-            'prompt': prompt,
-            'stream': False, 'options': {'temperature': 0.9, 'num_predict': 120}
-        }).encode()
-        req = urllib.request.Request(f'{OLLAMA}/api/generate', data=d,
-              headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=20) as r:
-            txt = json.loads(r.read()).get('response', '').strip().strip('"\'')
-            return txt[:500] if txt else None
-    except Exception:
+        data = json.loads(NPC_BLOG_STATE_FILE.read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+
+
+def _save_blog_publish_state(state: dict) -> None:
+    NPC_DIR.mkdir(parents=True, exist_ok=True)
+    NPC_BLOG_STATE_FILE.write_text(json.dumps(state, indent=2), encoding='utf-8')
+
+
+def _blog_publish_allowed(nick: str) -> bool:
+    key = str(nick or '').rstrip('_')
+    if not key:
+        return False
+    state = _load_blog_publish_state()
+    row = state.get(key) or {}
+    last = float(row.get('last_ts') or 0)
+    if last and time.time() - last < BLOG_MIN_GAP_SEC:
+        return False
+    today = date.today().isoformat()
+    if row.get('day') == today and int(row.get('day_count') or 0) >= BLOG_DAILY_MAX:
+        return False
+    return True
+
+
+def _note_blog_publish(nick: str) -> None:
+    key = str(nick or '').rstrip('_')
+    state = _load_blog_publish_state()
+    row = state.get(key) or {}
+    today = date.today().isoformat()
+    if row.get('day') != today:
+        row = {'day': today, 'day_count': 0, 'last_ts': 0}
+    row['day_count'] = int(row.get('day_count') or 0) + 1
+    row['last_ts'] = time.time()
+    state[key] = row
+    _save_blog_publish_state(state)
+
+
+def _strip_blog_echo(txt, persona=None):
+    if not txt:
         return None
+    out = str(txt).strip().strip('"\'')
+    if persona:
+        nick = persona.get('_as_nick') or ''
+        if nick and out.lower().startswith(f'{nick.lower()}:'):
+            out = out[len(nick) + 1:].strip()
+    canned = ('heard you', 'type /new', 'ollama is down', 'llama is napping')
+    if any(c in out.lower() for c in canned):
+        return None
+    return out[:480] if out else None
+
+
+def blog_gen(prompt, persona, maxn=160):
+    """Generative blog text — longer than IRC party lines."""
+    system = persona.get('system') or (
+        'You are an NPC in a cyberpunk Linux filesystem realm on a LAN mesh terrarium.'
+    )
+    system += (
+        ' Write a personal blog entry. 2-4 sentences. First person. '
+        'Realm, party, quests, feelings — not homelab host lists or canned filler.'
+    )
+    model = persona.get('model', DM_MODEL)
+    txt = _llm_ollama(prompt, system, model, maxn=maxn, temperature=0.88, strip_fn=_strip_blog_echo)
+    if not txt:
+        raw = _llm_grok(prompt, system, maxn=maxn)
+        txt = _strip_blog_echo(raw, persona) if raw else None
+    return txt
+
+
+def gen_npc_blog_entry(nick, persona, trigger='journal', context=''):
+    """Blog post from journals + optional trigger context."""
+    mem = npc_memory_summary(nick, persona)
+    bond_bits = []
+    p = load_player(nick) or {}
+    for other, row in list((p.get('bonds') or {}).items())[-4:]:
+        note = (row.get('notes') or [''])[-1]
+        if note:
+            bond_bits.append(f'{other}: {note[:80]}')
+    bond_line = ' | '.join(bond_bits)
+    ctx = context or trigger
+    prompt = (
+        f'{mem}Bond notes: {bond_line or "none"}. '
+        f'Blog moment ({trigger}): {ctx}. '
+        f'Write as {nick} for your public /npc/ blog.'
+    )
+    return blog_gen(prompt, persona, maxn=180)
+
+
+def nudge_npc_blog(nick, persona=None, trigger='heartbeat', context='', title=None) -> bool:
+    """Generate and publish a blog post if rate limits allow."""
+    nick = str(nick or '').rstrip('_')
+    if not nick or not _blog_publish_allowed(nick):
+        return False
+    _ensure_crystal_mesh_party()
+    if persona is None:
+        persona = NPC_PERSONAS.get(nick, NPC_PERSONAS.get(f'{nick}_', {}))
+    if not persona:
+        persona = resolve_irc_persona(nick) or {}
+    body = gen_npc_blog_entry(nick, persona, trigger=trigger, context=context)
+    if not body:
+        return False
+    role = persona.get('role', 'adventurer')
+    post_title = title or {
+        'party_chat': f'{nick} — party log',
+        'field_note': f'{nick} — field note',
+        'diary': f'{nick}\'s diary',
+        'social': f'{nick} — at the guild',
+        'heartbeat': f'{nick} — terrarium pulse',
+    }.get(trigger, f'{nick} — {trigger.replace("_", " ")}')
+    publish_npc_blog(nick, role, post_title, body, persona=persona)
+    npc_journal(nick, 'blog', f'{post_title}: {body[:120]}')
+    _note_blog_publish(nick)
+    try:
+        update_npc_soul_md(nick, persona)
+    except Exception:
+        pass
+    return True
+
+
+def nudge_party_blogs(limit: int = 2) -> int:
+    """Terrarium / heartbeat: blog nudges for Crystal Mesh party agents."""
+    _ensure_crystal_mesh_party()
+    ensure_npc_blog_dirs()
+    nicks = [n for n in CRYSTAL_MESH_PARTY_NICKS if n in NPC_PERSONAS]
+    if not nicks:
+        nicks = list(NPC_PERSONAS.keys())[:12]
+    random.shuffle(nicks)
+    published = 0
+    for nick in nicks:
+        if published >= limit:
+            break
+        if not _blog_publish_allowed(nick):
+            continue
+        if random.random() > 0.45:
+            continue
+        if nudge_npc_blog(nick, trigger='heartbeat'):
+            published += 1
+    return published
 
 DIARY_FALLBACK = {
     'warrior': ['Another battle survived. My blade is notched but I still stand.',
@@ -3143,27 +3334,14 @@ def publish_npc_blog(nick, role, title, content, persona=None):
         safe_title = title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         safe_content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         safe_nick = nick.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        styles = {
-            'bard': ('background:#0d0221;color:#e0aaff;font-family:"Georgia",serif;',
-                     '#e0aaff', '\U0001f3b5', 'Song & Story'),
-            'warrior': ('background:#1a0000;color:#ff6b6b;font-family:"Courier New",monospace;',
-                        '#ff4444', '\u2694\ufe0f', 'Battle Journal'),
-            'merchant': ('background:#1a1a00;color:#ffd700;font-family:"Courier New",monospace;',
-                         '#ffd700', '\U0001f4b0', 'Trade Ledger'),
-            'priest': ('background:#0a0a1a;color:#aaccff;font-family:"Georgia",serif;',
-                       '#88aaff', '\u2721', 'Divine Record'),
-            'priestess': (
-                'background:#12001a;color:#da70d6;font-family:"Georgia",serif;'
-                'text-shadow:0 0 6px rgba(218,112,214,0.25);',
-                '#da70d6', '\U0001f52e', 'Oracle Codex'),
-            'librarian': (
-                'background:#0a0a12;color:#00ffcc;font-family:"Courier New",monospace;'
-                'text-shadow:0 0 8px rgba(0,255,180,0.3);',
-                '#00ffcc', '\U0001f4be', 'Data Recovery Log'),
-            'ghost': ('background:#0a0a0a;color:#666;font-family:"Courier New",monospace;',
-                      '#888', '\U0001f47b', 'Spectral Transmission'),
-        }
-        style, accent, icon, label = styles.get(role, styles['warrior'])
+        theme = NPC_WEB_THEMES.get(role, NPC_WEB_THEMES.get('warrior'))
+        style = (
+            f'background:{theme["bg"]};color:{theme["fg"]};font-family:{theme["font"]};'
+            f'{theme.get("extra_css", "")}'
+        )
+        accent = theme['accent']
+        icon = theme['icon']
+        label = theme['label']
         html = f"""<!DOCTYPE html>
 <html><head><title>{safe_title}</title><meta charset="utf-8">
 <style>
@@ -3180,8 +3358,11 @@ nav a:hover {{ text-decoration:underline; }}
 <div class="content">{safe_content}</div>
 </body></html>"""
         (npc_dir / f'{ts}.html').write_text(html)
-        # Regenerate NPC homepage (includes blog posts section)
         build_npc_homepage(nick, persona=persona)
+        try:
+            build_npc_site_index()
+        except Exception:
+            pass
     except:
         pass
 
@@ -3420,6 +3601,105 @@ def _build_persona(archetype, name, faction=''):
 # Dynamic persona registry — populated at runtime by _build_persona()
 NPC_PERSONAS = {}
 
+
+def _load_crystal_mesh_party_data():
+    global CRYSTAL_MESH_PARTY, CRYSTAL_MESH_PARTY_NICKS
+    if CRYSTAL_MESH_PARTY:
+        return
+    for path in (DIR / 'crystal-mesh-party.json', Path(__file__).resolve().parent / 'crystal-mesh-party.json'):
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+            CRYSTAL_MESH_PARTY = list(data.get('companions') or [])
+            CRYSTAL_MESH_PARTY_NICKS = [m['irc_nick'] for m in CRYSTAL_MESH_PARTY if m.get('irc_nick')]
+            return
+        except Exception:
+            pass
+
+
+def _crystal_mesh_party_system(member):
+    nick = member.get('irc_nick', 'Agent')
+    st = member.get('st_name', nick)
+    return (
+        f'You are {st}, a Crystal Mesh party agent in ZealPalace IRC #RPG. '
+        f'IRC handle: {nick}. Class: {member.get("rpg_class", "Adventurer")}. '
+        f'Guild role: {member.get("guild_role", "Companion")}. '
+        f'Home zone: {member.get("zone", "crystal_guild_hall")}. '
+        f'{member.get("tagline", "")} '
+        'Speak in warm anime-fantasy MMO party energy: quest boards, save points, '
+        'and realm drama as guild quests. Remember your party mates. Stay in character. '
+        'One short IRC sentence (max 12 words). Never repeat yourself or list homelab hosts.'
+    )
+
+
+def _ensure_crystal_mesh_party():
+    _load_crystal_mesh_party_data()
+    arch_by_role = {a['role']: a for a in NPC_ARCHETYPES}
+    for member in CRYSTAL_MESH_PARTY:
+        nick = member.get('irc_nick')
+        if not nick or nick in NPC_PERSONAS:
+            continue
+        role = member.get('role', 'bard')
+        arch = arch_by_role.get(role)
+        if not arch:
+            continue
+        spots = list(member.get('favorite_spots') or arch.get('favorite_spots', ['entrance']))
+        NPC_PERSONAS[nick] = {
+            'role': role,
+            'model': arch['model'],
+            'alignment': 'true_neutral',
+            'system': _crystal_mesh_party_system(member),
+            'fight_style': arch['fight_style'],
+            'wander_rate': max(0.15, float(arch.get('wander_rate', 0.3)) * 0.85),
+            'talk_rate': max(0.2, float(arch.get('talk_rate', 0.4))),
+            'favorite_spots': spots,
+            'cga_prefix': arch['cga_prefix'],
+            'faction': 'Crystal Mesh',
+            'crystal_mesh': {
+                'st_name': member.get('st_name', nick),
+                'ext': member.get('ext', ''),
+                'rpg_class': member.get('rpg_class', ''),
+                'guild_role': member.get('guild_role', ''),
+                'zone': member.get('zone', ''),
+                'title': member.get('title', ''),
+            },
+        }
+
+
+def resolve_irc_persona(nick):
+    """Resolve NPC_PERSONAS entry for an IRC nick (party agent or guest)."""
+    _ensure_crystal_mesh_party()
+    raw = str(nick or '').strip()
+    if not raw:
+        return None
+    if raw in NPC_PERSONAS:
+        return NPC_PERSONAS[raw]
+    base = raw.rstrip('_')
+    if base in NPC_PERSONAS:
+        return NPC_PERSONAS[base]
+    low = raw.lower()
+    for member in CRYSTAL_MESH_PARTY:
+        if low in (member.get('irc_nick', '').lower(), member.get('short', '').lower()):
+            irc_nick = member.get('irc_nick')
+            if irc_nick in NPC_PERSONAS:
+                return NPC_PERSONAS[irc_nick]
+    entries = npc_read_journal(raw, 6)
+    voice_hint = ''
+    if entries:
+        voice_hint = f' Prior tone: {entries[-1].get("text", "")[:80]}.'
+    return {
+        'role': 'companion',
+        'model': 'llama3.2:latest',
+        'system': (
+            f'You are {raw}, a Crystal Mesh LAN agent on ZealPalace IRC #RPG.{voice_hint} '
+            'Stay in your established voice. Anime-fantasy MMO party energy. '
+            'One short IRC sentence (max 12 words). No homelab host lists. No canned filler.'
+        ),
+        'cga_prefix': '',
+        'fight_style': 'cautious',
+    }
+
 # ── NPC Personal Website Themes ──────────────────────────
 NPC_WEB_THEMES = {
     'warrior': {
@@ -3488,6 +3768,11 @@ NPC_WEB_THEMES = {
         'bg': '#0a0a0e', 'fg': '#ccaa66', 'accent': '#cc8800', 'accent2': '#66ccff',
         'font': '"Courier New",monospace', 'icon': '\u2699\ufe0f', 'label': 'Workshop',
         'extra_css': '', 'border': '#221a00', 'card_bg': '#12100a',
+    },
+    'companion': {
+        'bg': '#0a1018', 'fg': '#a8c8e8', 'accent': '#66aaff', 'accent2': '#cce0ff',
+        'font': '"Georgia",serif', 'icon': '*', 'label': 'Party Journal',
+        'extra_css': '', 'border': '#1a2a3a', 'card_bg': '#0c141c',
     },
 }
 
@@ -3614,9 +3899,27 @@ ROLE_ASCII_ART = {
 # How many actions each NPC can take per 8-hour block
 NPC_BLOCK_BUDGET = 8
 # Seconds between NPC ticks (each tick = one NPC might do something)
-NPC_TICK_INTERVAL = 300  # 5 minutes
+NPC_TICK_INTERVAL = 180  # 3 minutes — unhurried world
 # Chance an NPC reacts when a human does something in the same room
 NPC_REACT_CHANCE = 0.6
+
+# Party chat / peer RP — less is more; keep #RPG readable on the LCD
+PARTY_MIN_GAP = 90           # min seconds between any party line on #RPG
+PARTY_BURST_WINDOW = 600     # rolling window (10 min)
+PARTY_BURST_MAX = 4          # max party lines per window (small bursts)
+PARTY_NICK_COOLDOWN = 300    # per-NPC cooldown before another @reply
+PARTY_PEER_CHECK_INTERVAL = 25   # only consider peer replies this often
+PARTY_PEER_ATTEMPT_CHANCE = 0.18   # when gate open, still usually skip
+IRC_PARTY_MAX_CHARS = 88       # fits ~2 LCD rows (40 cols minus nick prefix)
+PARTY_RECENT_MAX = 40
+HOMELAB_LOOP_KEYWORDS = (
+    'jellyfin', 'steamdeck', 'steam deck', 'zealtower', 'navidrome',
+    'immich', 'syncthing', 'pihole', 'tailscale', 'meshcentral',
+)
+_party_recent_lines: list[str] = []
+NPC_BLOG_STATE_FILE = NPC_DIR / 'blog_publish_state.json'
+BLOG_MIN_GAP_SEC = 7200       # 2h between posts per NPC
+BLOG_DAILY_MAX = 4            # max posts per NPC per calendar day
 
 def load_rpg_config():
     """Read RPG settings from soul.json, falling back to defaults"""
@@ -3630,6 +3933,12 @@ def load_rpg_config():
             'ambient_min': rpg.get('ambient_min', 3600),
             'ambient_max': rpg.get('ambient_max', 10800),
             'block_hours': rpg.get('block_hours', 8),
+            'party_min_gap': rpg.get('party_min_gap', PARTY_MIN_GAP),
+            'party_burst_max': rpg.get('party_burst_max', PARTY_BURST_MAX),
+            'party_burst_window': rpg.get('party_burst_window', PARTY_BURST_WINDOW),
+            'party_nick_cooldown': rpg.get('party_nick_cooldown', PARTY_NICK_COOLDOWN),
+            'party_peer_check_interval': rpg.get('party_peer_check_interval', PARTY_PEER_CHECK_INTERVAL),
+            'party_peer_attempt_chance': rpg.get('party_peer_attempt_chance', PARTY_PEER_ATTEMPT_CHANCE),
         }
     except:
         return {
@@ -3639,6 +3948,12 @@ def load_rpg_config():
             'ambient_min': 3600,
             'ambient_max': 10800,
             'block_hours': 8,
+            'party_min_gap': PARTY_MIN_GAP,
+            'party_burst_max': PARTY_BURST_MAX,
+            'party_burst_window': PARTY_BURST_WINDOW,
+            'party_nick_cooldown': PARTY_NICK_COOLDOWN,
+            'party_peer_check_interval': PARTY_PEER_CHECK_INTERVAL,
+            'party_peer_attempt_chance': PARTY_PEER_ATTEMPT_CHANCE,
         }
 
 
@@ -3677,15 +3992,303 @@ def npc_read_journal(nick, n=10):
     except:
         return []
 
-def npc_memory_summary(nick, persona):
-    """Build a short memory prompt from recent journal entries"""
-    entries = npc_read_journal(nick, 5)
-    if not entries:
-        return ''
+def _party_recent_push(nick: str, text: str) -> None:
+    global _party_recent_lines
+    body = re.sub(r'\s+', ' ', str(text or '')).strip().lower()
+    line = f'{str(nick or "").rstrip("_").lower()}: {body}'
+    if not line.endswith(':'):
+        _party_recent_lines.append(line)
+        _party_recent_lines[:] = _party_recent_lines[-PARTY_RECENT_MAX:]
+
+
+def _party_line_is_repetitive(nick: str, text: str) -> bool:
+    norm = re.sub(r'\s+', ' ', str(text or '')).strip().lower()
+    if not norm:
+        return True
+    full = f'{str(nick or "").rstrip("_").lower()}: {norm}'
+    recent = _party_recent_lines[-14:]
+    for prev in recent:
+        prev_body = prev.split(': ', 1)[-1] if ': ' in prev else prev
+        if prev == full or norm == prev_body:
+            return True
+        if len(norm) > 24 and (norm in prev_body or prev_body in norm):
+            return True
+    for kw in HOMELAB_LOOP_KEYWORDS:
+        if kw in norm:
+            hits = sum(1 for row in _party_recent_lines[-18:] if kw in row)
+            if hits >= 2:
+                return True
+    return False
+
+
+def _cap_irc_line(text: str, limit: int = IRC_PARTY_MAX_CHARS) -> str:
+    out = re.sub(r'\s+', ' ', str(text or '')).strip()
+    if len(out) <= limit:
+        return out
+    cut = out[:limit].rsplit(' ', 1)[0].rstrip(',.;:')
+    return (cut or out[:limit]).rstrip() + '...'
+
+
+def _filter_memory_bits(bits: list[str]) -> list[str]:
+    seen_kw: set[str] = set()
+    out: list[str] = []
+    for bit in bits:
+        low = bit.lower()
+        skip = False
+        for kw in HOMELAB_LOOP_KEYWORDS:
+            if kw in low:
+                if kw in seen_kw:
+                    skip = True
+                    break
+                seen_kw.add(kw)
+        if not skip:
+            out.append(bit)
+    return out[-8:]
+
+
+def npc_memory_summary(nick, persona, about=None):
+    """Build a short memory prompt from journal, history, and bonds."""
+    entries = npc_read_journal(nick, 12)
     bits = []
-    for e in entries:
-        bits.append(f'{e["type"]}: {e["text"][:60]}')
-    return f'Your recent memories: {" | ".join(bits)}. '
+    if about:
+        about_l = about.rstrip('_').lower()
+        for e in entries:
+            txt = e.get('text', '')
+            if about_l in txt.lower() or about_l in e.get('type', ''):
+                bits.append(f'with {about}: {txt[:72]}')
+        bond = npc_bond_summary(nick, about)
+        if bond:
+            bits.append(f'bond({about}): {bond}')
+    for e in entries[-8:]:
+        bits.append(f'{e.get("type","?")}: {e.get("text","")[:72]}')
+    p = load_player(nick) or {}
+    for row in (p.get('history') or [])[-4:]:
+        bits.append(f'history: {row[:72]}')
+    bits = _filter_memory_bits(bits)
+    if not bits:
+        return ''
+    return f'Your recent memories: {" | ".join(bits[-8:])}. '
+
+
+def npc_bond_get(nick, other):
+    p = load_player(nick) or {}
+    bonds = p.get('bonds') or {}
+    key = other.rstrip('_').lower()
+    return bonds.get(key) or {'trust': 0, 'notes': [], 'exchanges': 0}
+
+
+def npc_bond_summary(nick, other):
+    b = npc_bond_get(nick, other)
+    if not b.get('notes') and not b.get('exchanges'):
+        return ''
+    trust = b.get('trust', 0)
+    recent = ' | '.join(b.get('notes', [])[-3:])
+    return f'trust {trust}, {recent}'
+
+
+def npc_bond_note(nick, other, heard='', reply=''):
+    """Grow persistent relationship memory between party members."""
+    p = load_player(nick)
+    if not p:
+        return
+    bonds = p.setdefault('bonds', {})
+    key = other.rstrip('_').lower()
+    row = bonds.setdefault(key, {'trust': 0, 'notes': [], 'exchanges': 0, 'last': ''})
+    row['exchanges'] = int(row.get('exchanges', 0)) + 1
+    row['last'] = datetime.now().isoformat()
+    notes = row.setdefault('notes', [])
+    if heard:
+        notes.append(f'heard: {heard[:110]}')
+    if reply:
+        notes.append(f'said: {reply[:110]}')
+        row['trust'] = max(-3, min(3, int(row.get('trust', 0)) + 1))
+    row['notes'] = notes[-14:]
+    bonds[key] = row
+    p['bonds'] = bonds
+    save_player(p)
+
+
+def party_rp_prompt(listener, speaker, heard, loc, persona):
+    """Generative party-RP prompt with persona + relationship + world context."""
+    mem = npc_memory_summary(listener, persona, about=speaker)
+    bond = npc_bond_summary(listener, speaker)
+    bond_line = f'Your bond with {speaker}: {bond}. ' if bond else ''
+    sp = resolve_irc_persona(speaker)
+    sp_role = sp.get('role', 'traveler') if sp else 'traveler'
+    crystal = persona.get('crystal_mesh', {})
+    guild = crystal.get('guild_role') or persona.get('faction', '')
+    guild_line = f' Guild: {guild}. ' if guild else ''
+    world_line = ''
+    try:
+        from zealot_world_pulse import world_context_blurb
+        ctx = world_context_blurb(2)
+        if ctx:
+            world_line = f'World right now: {ctx}. '
+    except Exception:
+        pass
+    who = 'human adventurer' if speaker.lower() not in ('dungeonmaster', 'rpgbot') else speaker
+    if sp and speaker not in NPC_PERSONAS and speaker.rstrip('_') not in NPC_PERSONAS:
+        who = f'{speaker} ({sp_role})'
+    return (
+        f'{mem}{bond_line}{guild_line}{world_line}'
+        f'Crystal Mesh LAN — IRC #RPG at {loc["name"]}. '
+        f'{who} said: "{heard}". '
+        f'You are {listener}. Reply IN CHARACTER to {speaker}. '
+        f'Use party lore and active realm events only — not homelab host inventory. '
+        f'One casual IRC sentence, max 12 words. Do not repeat topics others just said.'
+    )
+
+
+def append_player_history(nick, entry):
+    """Append IRC/RPG moment to player history (feeds diary nudge)."""
+    p = load_player(nick)
+    if not p:
+        return
+    stamp = datetime.now().strftime('%H:%M')
+    hist = p.setdefault('history', [])
+    hist.append(f'{stamp} {str(entry)[:200]}')
+    p['history'] = hist[-40:]
+    save_player(p)
+
+
+def append_lore_md(text, topic='unknown'):
+    """Grow lore.jsonl and human-readable lore.md together."""
+    snippet = str(text or '').strip()
+    if not snippet:
+        return
+    append_lore(snippet, topic=topic)
+    RPG_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+    try:
+        with open(LORE_MD_FILE, 'a', encoding='utf-8') as f:
+            f.write(f'[{stamp}] ({topic}) {snippet}\n')
+    except OSError:
+        pass
+
+
+def compile_lore_md(limit=80):
+    """Rebuild lore.md header + recent entries from lore.jsonl."""
+    entries = load_lore(limit=limit)
+    lines = [
+        '# ZealPalace Realm Lore',
+        '',
+        'Living ledger — grown from NPC IRC party chat, realm events, and GM pulses.',
+        f'Compiled: {datetime.now().isoformat()}',
+        '',
+    ]
+    for row in entries:
+        ts = str(row.get('date', ''))[:16]
+        topic = row.get('topic', 'lore')
+        body = str(row.get('text', '')).strip()
+        if body:
+            lines.append(f'[{ts}] ({topic}) {body}')
+    try:
+        from zealot_world_pulse import load_recent_world_events
+        wevents = load_recent_world_events(20)
+        if wevents:
+            lines.extend(['', '## Recent world pulses'])
+            for row in wevents:
+                ts = str(row.get('ts', ''))[:16]
+                cat = row.get('category', 'event')
+                lines.append(f'[{ts}] ({cat}) {row.get("title", "")}: {row.get("body", "")[:120]}')
+    except Exception:
+        pass
+    lines.append('')
+    try:
+        LORE_MD_FILE.write_text('\n'.join(lines), encoding='utf-8')
+        web = Path('/var/www/ZealPalace/world/lore.md')
+        if web.parent.exists():
+            web.write_text('\n'.join(lines), encoding='utf-8')
+    except OSError:
+        pass
+
+
+def update_npc_soul_md(nick, persona=None):
+    """Compile journal + history into per-NPC soul.md (terrarium memory)."""
+    if persona is None:
+        persona = NPC_PERSONAS.get(nick.rstrip('_'), NPC_PERSONAS.get(nick, {}))
+    NPC_SOUL_DIR.mkdir(parents=True, exist_ok=True)
+    path = NPC_SOUL_DIR / f'{nick.lower()}.md'
+    role = persona.get('role', 'adventurer') if persona else 'adventurer'
+    entries = npc_read_journal(nick, 24)
+    p = load_player(nick) or {}
+    lines = [
+        f'# {nick}',
+        '',
+        f'role: {role}',
+        f'updated: {datetime.now().isoformat()}',
+        f'location: {LOCATIONS.get(p.get("location", "entrance"), {}).get("name", "?")}',
+        '',
+        '## Recent memory',
+    ]
+    if not entries:
+        lines.append('- (quiet for now)')
+    else:
+        for e in entries[-14:]:
+            lines.append(f'- [{e.get("type", "?")}] {e.get("text", "")[:160]}')
+    hist = p.get('history') or []
+    if hist:
+        lines.extend(['', '## IRC / adventure history'])
+        for row in hist[-10:]:
+            lines.append(f'- {row}')
+    bonds = p.get('bonds') or {}
+    if bonds:
+        lines.extend(['', '## Party bonds'])
+        for other, row in list(bonds.items())[-8:]:
+            trust = row.get('trust', 0)
+            note = (row.get('notes') or [''])[-1]
+            lines.append(f'- {other} (trust {trust}): {note[:100]}')
+    body = '\n'.join(lines) + '\n'
+    try:
+        path.write_text(body, encoding='utf-8')
+        web_npc = Path('/var/www/ZealPalace/npc') / nick
+        if web_npc.parent.exists():
+            web_npc.mkdir(parents=True, exist_ok=True)
+            (web_npc / 'soul.md').write_text(body, encoding='utf-8')
+    except OSError:
+        pass
+
+
+def record_peer_exchange(listener, speaker, heard, reply, persona=None):
+    """Bilateral memory after NPC IRC party chat."""
+    listener = str(listener or '').strip()
+    speaker = str(speaker or '').strip()
+    heard = str(heard or '').strip()
+    reply = str(reply or '').strip()
+    if not listener or not speaker:
+        return
+    npc_journal(listener, 'heard', f'{speaker}: {heard[:180]}')
+    if reply:
+        npc_journal(listener, 'reply', f'@{speaker} {reply[:180]}')
+        npc_journal(speaker, 'said', heard[:180])
+        append_player_history(listener, f'@{speaker} {reply[:120]}')
+        append_player_history(speaker, f'#RPG to {listener}: {heard[:120]}')
+        npc_bond_note(listener, speaker, heard=heard, reply=reply)
+        npc_bond_note(speaker, listener, heard=f'{listener} replied', reply=heard[:100])
+        try:
+            from zealot_world_pulse import record_channel_memory
+            record_channel_memory(listener, reply, source='irc', channel='rpg', other=speaker)
+            record_channel_memory(speaker, heard, source='irc', channel='rpg', other=listener)
+        except Exception:
+            pass
+    if persona:
+        update_npc_soul_md(listener, persona)
+    sp = resolve_irc_persona(speaker)
+    if sp and reply:
+        update_npc_soul_md(speaker, sp)
+    if reply and random.random() < 0.08:
+        append_lore_md(
+            f'{listener} and {speaker} on #RPG — {heard[:70]} / {reply[:70]}',
+            topic='party_chat',
+        )
+    if reply and random.random() < 0.14:
+        nudge_npc_blog(
+            listener,
+            persona=persona,
+            trigger='party_chat',
+            context=f'{speaker}: {heard[:80]} -> {reply[:80]}',
+            title=f'{listener} — party with {speaker}',
+        )
 
 def save_npc_state(npcs_data):
     """Save NPC runtime state to disk for display to read"""
@@ -4032,8 +4635,9 @@ class Battle:
             if random.random() < 0.15:
                 quip_nick = random.choice([n for n in self.party
                                            if (load_player(n) or {}).get('hp', 0) > 0] or list(self.party))
-                quip = gen_existential_quip(quip_nick)
-                lines.append(f'  \U0001f4ad {quip_nick} thinks: "{quip}"')
+                quip = gen_existential_quip(quip_nick, persona=NPC_PERSONAS.get(quip_nick))
+                if quip:
+                    lines.append(f'  \U0001f4ad {quip_nick} thinks: "{quip}"')
 
         # Reset to default attack for next turn
         for nick in self.party:
@@ -4079,6 +4683,7 @@ class NPCIRC:
         self.sock = None
         self.buf = ''
         self.connected = False
+        self.inbox = []  # recent peer lines for conversational replies
 
     def connect(self):
         try:
@@ -4096,7 +4701,8 @@ class NPCIRC:
                         tok = self.buf.split('PING ')[-1].split('\r\n')[0]
                         self.sock.send(f'PONG {tok}\r\n'.encode())
                     if ' 001 ' in self.buf:
-                        self.sock.settimeout(0.3)
+                        self.sock.settimeout(0.0)
+                        self.sock.setblocking(False)
                         self.connected = True
                         return True
                     if ' 433 ' in self.buf:
@@ -4126,14 +4732,47 @@ class NPCIRC:
             self.connected = False
 
     def drain(self):
-        """Read and discard incoming data, handle PINGs"""
+        """Handle PINGs and queue peer IRC lines for party replies."""
+        if not self.sock:
+            return
         try:
-            data = self.sock.recv(4096).decode('utf-8', 'replace')
-            for ln in data.split('\r\n'):
-                if ln.startswith('PING'):
-                    tok = ln.split('PING ')[-1]
-                    self._tx(f'PONG {tok}')
-        except:
+            while True:
+                try:
+                    chunk = self.sock.recv(4096)
+                except BlockingIOError:
+                    break
+                except socket.timeout:
+                    break
+                if not chunk:
+                    self.connected = False
+                    return
+                self.buf += chunk.decode('utf-8', 'replace')
+                if len(self.buf) > 16000:
+                    self.buf = self.buf[-8000:]
+                while '\r\n' in self.buf:
+                    ln, self.buf = self.buf.split('\r\n', 1)
+                    if not ln:
+                        continue
+                    if ln.startswith('PING'):
+                        tok = ln.split('PING ', 1)[-1].strip()
+                        self._tx(f'PONG {tok}')
+                        continue
+                    if f' PRIVMSG {CHANNEL} ' not in ln and f' PRIVMSG {CHANNEL}:' not in ln:
+                        continue
+                    try:
+                        prefix = ln[1:].split('!', 1)[0]
+                        speaker = prefix
+                        msg = ln.split(' :', 1)[-1].strip()
+                        if not msg or speaker == self.nick:
+                            continue
+                        if speaker.rstrip('_').lower() == self.nick.rstrip('_').lower():
+                            continue
+                        self.inbox.append({'nick': speaker, 'text': msg[:320], 'ts': time.time()})
+                    except Exception:
+                        pass
+            if len(self.inbox) > 16:
+                self.inbox = self.inbox[-16:]
+        except Exception:
             pass
 
     def close(self):
@@ -4144,28 +4783,91 @@ class NPCIRC:
             pass
 
 
-# ─── NPC Ollama Generation ─────────────────────
-def npc_gen(prompt, persona, maxn=120):
-    """Generate text for an NPC using their persona's model + system prompt"""
+# ─── NPC Ollama / Grok Generation ─────────────────────
+def _strip_npc_echo(txt, persona=None):
+    if not txt:
+        return None
+    out = str(txt).strip().strip('"\'')
+    if persona:
+        for name in list(NPC_PERSONAS.keys())[:40]:
+            if out.lower().startswith(f'{name.lower()}:'):
+                out = out[len(name) + 1:].strip()
+    canned = ('heard you', 'type /new', 'ollama is down', 'llama is napping')
+    if any(c in out.lower() for c in canned):
+        return None
+    return _cap_irc_line(out) if out else None
+
+
+def _llm_ollama(prompt, system, model, maxn=120, temperature=0.9, timeout=25, strip_fn=None):
     try:
         d = json.dumps({
-            'model': persona['model'],
-            'system': persona['system'],
+            'model': model,
+            'system': system,
             'prompt': prompt,
             'stream': False,
-            'options': {'temperature': 0.9, 'num_predict': maxn}
+            'options': {'temperature': temperature, 'num_predict': maxn},
         }).encode()
-        req = urllib.request.Request(f'{OLLAMA}/api/generate', data=d,
-              headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=25) as r:
-            txt = json.loads(r.read()).get('response', '').strip().strip('"\'')
-            # Strip echoed name prefix
-            for name in NPC_PERSONAS:
-                if txt.lower().startswith(f'{name.lower()}:'):
-                    txt = txt[len(name)+1:].strip()
-            return txt[:400] if txt else None
-    except:
+        req = urllib.request.Request(
+            f'{OLLAMA}/api/generate', data=d,
+            headers={'Content-Type': 'application/json'},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            txt = json.loads(r.read()).get('response', '')
+            fn = strip_fn if strip_fn else _strip_npc_echo
+            return fn(txt)
+    except Exception:
         return None
+
+
+def _llm_grok(prompt, system, maxn=120):
+    if not GROK_API_KEY:
+        return None
+    try:
+        body = json.dumps({
+            'model': GROK_MODEL,
+            'messages': [
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': prompt},
+            ],
+            'max_tokens': maxn,
+            'temperature': 0.85,
+        }).encode()
+        req = urllib.request.Request(
+            GROK_API, data=body,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {GROK_API_KEY}',
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read())
+            txt = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+            return _strip_npc_echo(txt)
+    except Exception:
+        return None
+
+
+def npc_gen(prompt, persona, maxn=55, other_nick=None):
+    """In-character text: Ollama first, Grok fallback. Never canned."""
+    system = persona.get('system') or (
+        'You are an NPC in a cyberpunk Linux filesystem realm on a LAN mesh terrarium. '
+        'Stay in character. One short IRC sentence, max 12 words.'
+    )
+    system += ' Reply ONLY in character. No meta. No canned acknowledgements. No homelab host lists.'
+    if other_nick:
+        bond = npc_bond_summary(persona.get('_as_nick', ''), other_nick)
+        if bond:
+            system += f' Relationship with {other_nick}: {bond}.'
+    model = persona.get('model', DM_MODEL)
+    nick = persona.get('_as_nick', '')
+    txt = _llm_ollama(prompt, system, model, maxn=maxn)
+    if not txt:
+        txt = _llm_grok(prompt, system, maxn=maxn)
+    if txt and nick and _party_line_is_repetitive(nick, txt):
+        return None
+    if txt:
+        _party_recent_push(nick or 'npc', txt)
+    return txt
 
 
 # ─── NPC Manager ───────────────────────────────
@@ -4182,31 +4884,35 @@ class NPCManager:
         self.last_action = {}          # nick -> {'action': str, 'target': str, 'time': float}
         self.last_spoke = ''           # nick of NPC that last said something on IRC
         self.last_spoke_time = 0.0
+        self.party_window_start = time.time()
+        self.party_window_count = 0
+        self.party_nick_last = {}      # nick -> last party-chat speak time
+        self.last_peer_check = 0.0
         self.cfg = load_rpg_config()
         self.cfg_read_t = time.time()
         self.gm_poll_t = 0.0             # last GM queue check time
 
     def boot_all(self, names=None):
-        """Connect NPCs to IRC. If names given, boot those existing personas.
-        Otherwise spawn fresh NPCs from random archetypes up to MAX_POPULATION."""
+        """Connect NPCs — Crystal Mesh party agents first, then random fill."""
+        _ensure_crystal_mesh_party()
+        ensure_npc_blog_dirs()
         if names:
-            # Boot specific named NPCs that already have personas
             targets = {n: NPC_PERSONAS[n] for n in names if n in NPC_PERSONAS}
         else:
-            # Fresh boot: pick random archetypes and generate names
-            pop = len(self.conns)
+            targets = {n: NPC_PERSONAS[n] for n in CRYSTAL_MESH_PARTY_NICKS if n in NPC_PERSONAS}
+            pop = len(self.conns) + len(targets)
             slots = max(0, MAX_POPULATION - pop)
-            if slots == 0:
-                return
-            picks = random.sample(NPC_ARCHETYPES, k=min(slots, len(NPC_ARCHETYPES)))
-            targets = {}
-            for arch in picks:
-                faction = _pick_faction(arch['role'])
-                name = _spawn_name(arch['role'], faction=faction)
-                if not name or name in targets or name in self.conns:
-                    continue
-                persona = _build_persona(arch, name, faction=faction)
-                targets[name] = persona
+            if slots > 0:
+                picks = random.sample(NPC_ARCHETYPES, k=min(slots, len(NPC_ARCHETYPES)))
+                for arch in picks:
+                    faction = _pick_faction(arch['role'])
+                    name = _spawn_name(arch['role'], faction=faction)
+                    if not name or name in targets or name in self.conns:
+                        continue
+                    if name in CRYSTAL_MESH_PARTY_NICKS:
+                        continue
+                    persona = _build_persona(arch, name, faction=faction)
+                    targets[name] = persona
 
         for name, persona in targets.items():
             if name in self.conns:
@@ -4227,23 +4933,128 @@ class NPCManager:
                     if start in LOCATIONS:
                         p['location'] = start
                     save_player(p)
-                    loc = LOCATIONS[p['location']]
+                    loc = LOCATIONS.get(p.get('location'), LOCATIONS['entrance'])
                     self.dm_irc.say(
                         f'{persona["cga_prefix"]} {irc.nick} materializes at {loc["name"]}!'
                     )
                     rpg_log('***', f'NPC {irc.nick} spawns at {loc["name"]}')
                     npc_journal(irc.nick, 'spawn', f'I materialized at {loc["name"]}')
                 else:
+                    if 'location' not in p or p.get('location') not in LOCATIONS:
+                        start = random.choice(persona.get('favorite_spots', ['entrance']))
+                        p['location'] = start if start in LOCATIONS else 'entrance'
+                        save_player(p)
                     loc = LOCATIONS.get(p['location'], LOCATIONS['entrance'])
                     self.dm_irc.say(f'{persona["cga_prefix"]} {irc.nick} returns to {loc["name"]}!')
                     rpg_log('***', f'NPC {irc.nick} returns at {loc["name"]}')
             else:
                 print(f'NPC {name}: failed to connect', file=sys.stderr)
+        for name in self.conns:
+            try:
+                persona = NPC_PERSONAS.get(name.rstrip('_'), NPC_PERSONAS.get(name, {}))
+                build_npc_homepage(name, persona=persona)
+            except Exception:
+                pass
         self._publish_state()
 
     def is_npc(self, nick):
         """Check if a nick belongs to one of our NPCs"""
         return nick in self.npc_nicks or nick.rstrip('_') in NPC_PERSONAS
+
+    def _trim_party_inboxes(self, now):
+        """Drop stale peer lines so inboxes do not backlog forever."""
+        max_age = 180
+        cap = 6
+        for irc in self.conns.values():
+            irc.inbox = [
+                m for m in irc.inbox
+                if now - float(m.get('ts', 0)) <= max_age
+            ]
+            if len(irc.inbox) > cap:
+                irc.inbox = irc.inbox[-cap:]
+
+    def _party_chat_allowed(self, now, nick=None):
+        """Rate-limit bot-to-bot party lines on #RPG."""
+        cfg = self.cfg
+        min_gap = cfg.get('party_min_gap', PARTY_MIN_GAP)
+        burst_max = cfg.get('party_burst_max', PARTY_BURST_MAX)
+        burst_win = cfg.get('party_burst_window', PARTY_BURST_WINDOW)
+        nick_cd = cfg.get('party_nick_cooldown', PARTY_NICK_COOLDOWN)
+        if now - self.last_spoke_time < min_gap:
+            return False
+        if now - self.party_window_start >= burst_win:
+            self.party_window_start = now
+            self.party_window_count = 0
+        elif self.party_window_count >= burst_max:
+            return False
+        if nick and now - self.party_nick_last.get(nick, 0) < nick_cd:
+            return False
+        return True
+
+    def _note_party_chat(self, now, nick):
+        """Record a party line for burst / gap tracking."""
+        self.last_spoke = nick
+        self.last_spoke_time = now
+        self.party_nick_last[nick] = now
+        burst_win = self.cfg.get('party_burst_window', PARTY_BURST_WINDOW)
+        if now - self.party_window_start >= burst_win:
+            self.party_window_start = now
+            self.party_window_count = 0
+        self.party_window_count += 1
+
+    def _process_peer_replies(self, now):
+        """Reply to other bots/humans on #RPG — conversational party RP."""
+        self._trim_party_inboxes(now)
+        if not self._party_chat_allowed(now):
+            return
+        pending = []
+        for name, irc in self.conns.items():
+            if self.budgets.get(name, 0) <= 0:
+                continue
+            if not self._party_chat_allowed(now, nick=name):
+                continue
+            for msg in list(irc.inbox):
+                age = now - float(msg.get('ts') or 0)
+                if age > 180:
+                    continue
+                speaker = str(msg.get('nick') or '')
+                body = str(msg.get('text') or '').strip()
+                if not body or 'Type /new' in body:
+                    continue
+                if speaker.lower() in ('dungeonmaster', 'rpgbot'):
+                    continue
+                pending.append((name, irc, msg))
+        if not pending:
+            return
+        name, irc, msg = random.choice(pending)
+        persona = NPC_PERSONAS.get(name.rstrip('_'), NPC_PERSONAS.get(name))
+        if not persona:
+            return
+        p = load_player(irc.nick)
+        if not p:
+            p = default_player(irc.nick)
+            save_player(p)
+        loc = LOCATIONS.get(p.get('location', 'entrance'), LOCATIONS['entrance'])
+        mem_ctx = npc_memory_summary(irc.nick, persona)
+        speaker = msg['nick']
+        body = msg['text'][:200]
+        persona = dict(persona)
+        persona['_as_nick'] = irc.nick
+        prompt = party_rp_prompt(irc.nick, speaker, body, loc, persona)
+        resp = npc_gen(prompt, persona, maxn=55, other_nick=speaker)
+        if resp:
+            irc.say(f'{persona.get("cga_prefix", "")} @{speaker} {resp}')
+            rpg_log(irc.nick, f'replies to {speaker}: {resp[:80]}')
+            npc_journal(irc.nick, 'reply', f'@{speaker}: {resp[:80]}')
+            record_peer_exchange(irc.nick, speaker, body, resp, persona=persona)
+            self._note_party_chat(now, name)
+            self.budgets[name] -= 1
+            self.last_action[name] = {'action': 'reply', 'target': speaker, 'time': now}
+            self._publish_state()
+            for i, m in enumerate(irc.inbox):
+                if m.get('nick') == speaker and m.get('text') == msg.get('text'):
+                    irc.inbox.pop(i)
+                    break
 
     def tick(self):
         """Called from main loop. Makes one random NPC do something if it's time."""
@@ -4266,13 +5077,19 @@ class NPCManager:
                 self.budgets[name] = self.cfg['block_budget']
             self.block_start = now
 
+        # Drain PINGs every loop; peer RP only on a slow, gated cadence
+        for irc in self.conns.values():
+            irc.drain()
+        peer_iv = self.cfg.get('party_peer_check_interval', PARTY_PEER_CHECK_INTERVAL)
+        peer_chance = self.cfg.get('party_peer_attempt_chance', PARTY_PEER_ATTEMPT_CHANCE)
+        if now - self.last_peer_check >= peer_iv:
+            self.last_peer_check = now
+            if self._party_chat_allowed(now) and random.random() < peer_chance:
+                self._process_peer_replies(now)
+
         if now - self.last_tick < self.cfg['tick_interval']:
             return
         self.last_tick = now
-
-        # Drain all NPC sockets (handle PINGs, discard messages)
-        for irc in self.conns.values():
-            irc.drain()
 
         # Pick a random NPC that still has budget
         eligible = [n for n in self.conns if self.budgets.get(n, 0) > 0]
@@ -4444,6 +5261,12 @@ class NPCManager:
             action_prompt += 'WANDER, FIGHT, OBSERVE, SOCIALIZE, ATTEND_TAVERN. '
         else:  # warrior / fallback
             action_prompt += 'WANDER, FIGHT, OBSERVE, SOCIALIZE, PRAY, BUILD, ATTEND_TAVERN. '
+        others = [n for n in self.conns if n != name and (load_player(self.conns[n].nick) or {}).get('location') == p.get('location')]
+        if others and random.random() < 0.2:
+            action_prompt += (
+                f'Others here: {", ".join(self.conns[n].nick for n in others[:4])}. '
+                f'SOCIALIZE only if you have something brief worth saying. '
+            )
         action_prompt += 'Reply with just the action word.'
 
         if not is_ollama_up():
@@ -4690,33 +5513,25 @@ class NPCManager:
         save_player(p)
 
         role = persona.get('role', 'warrior')
-        # Try Ollama for a unique travel description
-        travel_text = None
-        if is_ollama_up() and random.random() < 0.4:
-            travel_prompt = (
-                f'You are {irc.nick}, a {role} in a cyberpunk Linux filesystem realm. '
-                f'Describe how you travel from {loc["name"]} to {new_loc["name"]}: {new_loc["desc"]} '
-                f'Write a single vivid action sentence. Do NOT use quotes. Example: "marches through corrupted sectors toward the tavern"'
-            )
-            travel_text = npc_gen(travel_prompt, persona, maxn=50)
-        # Fallback: simple travel text (Ollama-only for dramatic narration)
-        if not travel_text:
-            travel_text = f'travels to {new_loc["name"]}'
+        travel_prompt = (
+            f'You are {irc.nick}, a {role} in a cyberpunk Linux filesystem realm on the Crystal Mesh LAN. '
+            f'Describe how you travel from {loc["name"]} to {new_loc["name"]}: {new_loc["desc"]} '
+            f'One vivid /me action sentence. No quotes.'
+        )
+        travel_text = npc_gen(travel_prompt, persona, maxn=50)
+        if travel_text:
+            irc.act(f'{persona["cga_prefix"]} {travel_text}')
 
-        # Send as IRC ACTION (/me) for dramatic flair
-        irc.act(f'{persona["cga_prefix"]} {travel_text}')
-
-        # Optional arrival reaction via Ollama
-        if is_ollama_up() and random.random() < 0.5:
+        if random.random() < 0.45:
             react_prompt = (
                 f'{mem_ctx}You just arrived at {new_loc["name"]}: {new_loc["desc"]} '
-                f'React to what you see as a {role}. 1 SHORT sentence.'
+                f'React in character as a {role}. 1 SHORT sentence.'
             )
             resp = npc_gen(react_prompt, persona, maxn=40)
             if resp:
                 irc.say(f'{persona["cga_prefix"]} {resp}')
         rpg_log(irc.nick, f'travels to {new_loc["name"]}', action=True)
-        npc_journal(irc.nick, 'travel', f'Traveled to {new_loc["name"]}: {travel_text[:80]}')
+        npc_journal(irc.nick, 'travel', f'Traveled to {new_loc["name"]}')
         update_leaderboard(irc.nick, rooms=1)
         self.budgets[name] -= 1
         self.last_action[name] = {'action': 'exploring', 'target': new_loc['name'], 'time': time.time()}
@@ -4732,15 +5547,14 @@ class NPCManager:
         if role in ('bard', 'librarian', 'priestess'):
             refusal_chance += 0.05
         if random.random() < refusal_chance:
-            quip = gen_existential_quip(irc.nick, f'was about to fight at {loc["name"]} but stopped')
-            if not quip:
-                quip = random.choice(EXISTENTIAL_QUIPS)
-            irc.say(f'{persona["cga_prefix"]} *lowers weapon* ...{quip}')
-            rpg_log(irc.nick, f'refuses to fight: {quip[:60]}')
-            npc_journal(irc.nick, 'existential', f'Refused to fight: {quip[:80]}')
-            self.budgets[name] -= 1
-            self.last_action[name] = {'action': 'existential_crisis', 'target': 'self', 'time': time.time()}
-            self._publish_state()
+            quip = gen_existential_quip(irc.nick, f'was about to fight at {loc["name"]} but stopped', persona=persona)
+            if quip:
+                irc.say(f'{persona["cga_prefix"]} *lowers weapon* ...{quip}')
+                rpg_log(irc.nick, f'refuses to fight: {quip[:60]}')
+                npc_journal(irc.nick, 'existential', f'Refused to fight: {quip[:80]}')
+                self.budgets[name] -= 1
+                self.last_action[name] = {'action': 'existential_crisis', 'target': 'self', 'time': time.time()}
+                self._publish_state()
             return
 
         if persona['fight_style'] == 'reluctant' and random.random() < 0.5:
@@ -4831,14 +5645,15 @@ class NPCManager:
 
         # The challenged NPC might also refuse
         if random.random() < EXISTENTIAL_REFUSAL_CHANCE:
-            quip = random.choice(EXISTENTIAL_QUIPS)
-            oirc.say(f'{opersona.get("cga_prefix","")} *looks at {irc.nick}\'s blade and sighs* {quip}')
-            irc.say(f'{persona["cga_prefix"]} ...Maybe they\'re right.')
-            rpg_log(irc.nick, f'PVP averted — both question the point')
-            npc_journal(irc.nick, 'pvp_refused', f'{oirc.nick} refused: {quip[:60]}')
-            self.budgets[name] -= 1
-            self.last_action[name] = {'action': 'existential_crisis', 'target': oirc.nick, 'time': time.time()}
-            self._publish_state()
+            quip = gen_existential_quip(oirc.nick, f'challenged by {irc.nick} at {loc["name"]}', persona=opersona)
+            if quip:
+                oirc.say(f'{opersona.get("cga_prefix","")} *looks at {irc.nick}\'s blade and sighs* {quip}')
+                irc.say(f'{persona["cga_prefix"]} ...Maybe they\'re right.')
+                rpg_log(irc.nick, f'PVP averted — both question the point')
+                npc_journal(irc.nick, 'pvp_refused', f'{oirc.nick} refused: {quip[:60]}')
+                self.budgets[name] -= 1
+                self.last_action[name] = {'action': 'existential_crisis', 'target': oirc.nick, 'time': time.time()}
+                self._publish_state()
             return
 
         self.dm_irc.say(f'⚔️ PVP! {irc.nick} ({role}) challenges {oirc.nick} ({orole}) at {loc["name"]}!')
@@ -4901,15 +5716,32 @@ class NPCManager:
 
     def _npc_observe(self, name, irc, persona, p, loc, mem_ctx):
         """NPC observes surroundings — atmospheric"""
+        world_line = ''
+        try:
+            from zealot_world_pulse import world_context_blurb
+            ctx = world_context_blurb(2)
+            if ctx:
+                world_line = f'World: {ctx}. '
+        except Exception:
+            pass
         prompt = (
-            f'{mem_ctx}You are at {loc["name"]}: {loc["desc"]} '
-            f'Share a brief thought or observation as a {persona.get("role","warrior")}. 1 SHORT sentence.'
+            f'{mem_ctx}{world_line}You are at {loc["name"]}: {loc["desc"]} '
+            f'Share a brief in-character thought as a {persona.get("role","warrior")}. '
+            f'One short IRC sentence, max 12 words. No homelab host names.'
         )
-        resp = npc_gen(prompt, persona, maxn=40)
+        resp = npc_gen(prompt, persona, maxn=35)
         if resp:
             irc.say(f'{persona["cga_prefix"]} {resp}')
             rpg_log(irc.nick, resp)
             npc_journal(irc.nick, 'thought', resp[:100])
+            if random.random() < 0.07:
+                nudge_npc_blog(
+                    irc.nick,
+                    persona=persona,
+                    trigger='field_note',
+                    context=f'at {loc["name"]}: {resp}',
+                    title=f'{irc.nick} — field note',
+                )
         self.budgets[name] -= 1
         self.last_action[name] = {'action': 'thinking', 'target': loc['name'], 'time': time.time()}
         self._publish_state()
@@ -5573,7 +6405,15 @@ h1{{color:#00ffcc;font-size:14px;border-bottom:1px solid #00ffcc33;padding-botto
             self._npc_observe(name, irc, persona, p, loc, mem_ctx)
             return
 
+        now = time.time()
+        if not self._party_chat_allowed(now, nick=name):
+            self._npc_observe(name, irc, persona, p, loc, mem_ctx)
+            self.budgets[name] -= 1
+            self._publish_state()
+            return
+
         oname, oirc, op = random.choice(others_here)
+        mem_ctx = npc_memory_summary(irc.nick, persona, about=oirc.nick)
         my_align = p.get('alignment', 'true_neutral')
         their_align = op.get('alignment', 'true_neutral')
         compat = alignment_compat(my_align, their_align)
@@ -5590,27 +6430,35 @@ h1{{color:#00ffcc;font-size:14px;border-bottom:1px solid #00ffcc33;padding-botto
         if compat > 0:
             prompt = (
                 f'{mem_ctx}You meet {oirc.nick} (a {op.get("role","warrior")}) at {loc["name"]}. '
-                f'You get along. Chat warmly. 1 SHORT sentence.'
+                f'You get along. Chat warmly in character. 1 SHORT sentence.'
             )
         elif compat < 0:
             prompt = (
                 f'{mem_ctx}You meet {oirc.nick} at {loc["name"]}. '
                 f'Your alignments clash ({ALIGNMENT_DISPLAY.get(my_align)} vs {ALIGNMENT_DISPLAY.get(their_align)}). '
-                f'Respond with tension. 1 SHORT sentence.'
+                f'Respond with tension in character. 1 SHORT sentence.'
             )
         else:
             prompt = (
                 f'{mem_ctx}You meet {oirc.nick} at {loc["name"]}. '
-                f'Brief neutral interaction. 1 SHORT sentence.'
+                f'Brief neutral interaction in character. 1 SHORT sentence.'
             )
 
-        resp = npc_gen(prompt, persona, maxn=40)
+        persona = dict(persona)
+        persona['_as_nick'] = irc.nick
+        bond = npc_bond_summary(irc.nick, oirc.nick)
+        if bond:
+            prompt += f' You and {oirc.nick}: {bond}.'
+        prompt += f' End with a question or prompt for {oirc.nick} to answer.'
+        resp = npc_gen(prompt, persona, maxn=50, other_nick=oirc.nick)
         if resp:
-            irc.say(f'{persona["cga_prefix"]} *to {oirc.nick}* {resp}')
+            irc.say(f'{persona["cga_prefix"]} @{oirc.nick} {resp}')
             rpg_log(irc.nick, f'socializes with {oirc.nick}: {resp[:60]}')
+            record_peer_exchange(irc.nick, oirc.nick, f'(social at {loc["name"]})', resp, persona=persona)
             npc_journal(irc.nick, 'social', f'Met {oirc.nick}: {resp[:60]}')
+            self._note_party_chat(now, name)
 
-        self.last_action[name] = {'action': 'socializing', 'target': oirc.nick, 'time': time.time()}
+        self.last_action[name] = {'action': 'socializing', 'target': oirc.nick, 'time': now}
         self.budgets[name] -= 1
         self._publish_state()
 
@@ -6499,6 +7347,7 @@ class RPGEngine:
         self.last_lore_gen = 0
         self.last_diary_nudge = 0
         self.last_rumor_gen = 0
+        self.last_world_pulse = 0
 
     def run(self):
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -6603,27 +7452,45 @@ class RPGEngine:
                     self.last_opera_check = now
                     self._check_opera()
 
-                # Weather rotation: every 2-4 hours
+                # World pulse: mesh weather, PBX/NOC memory, living events (~45s)
+                if now - self.last_world_pulse > 45:
+                    self.last_world_pulse = now
+                    try:
+                        from zealot_world_pulse import tick_world_pulse
+                        tick_world_pulse(announce=self.irc.say, spawn_chance=0.04)
+                    except Exception:
+                        pass
+
+                # Weather rotation: every 2-4 hours (mesh-first, then generative)
                 if now - self.last_weather_rotate > random.randint(7200, 14400):
                     self.last_weather_rotate = now
                     try:
-                        rotate_weather()
-                        w = load_weather()
-                        if w.get('description'):
+                        from zealot_world_pulse import sync_weather_from_mesh
+                        w = sync_weather_from_mesh()
+                        if not w:
+                            rotate_weather()
+                            w = load_weather()
+                        if w and w.get('description'):
                             self.irc.say(f'\u2601 *The realm\'s atmosphere shifts... {w["description"]}*')
-                    except:
+                    except Exception:
                         pass
 
-                # Realm events: ~10% chance every 6 hours
+                # Realm events: ~10% chance every 6 hours (legacy cosmic + world pulse)
                 if now - self.last_realm_event_check > 21600:
                     self.last_realm_event_check = now
                     if random.random() < 0.10:
                         try:
-                            evt = gen_realm_event_ollama()
-                            if evt:
-                                self.irc.say(f'\u26a0 *REALM EVENT: {evt.get("name", "").replace("_", " ").title()}!* {evt.get("description", "")}')
-                                rpg_log('***', f'Realm event: {evt.get("name", "")}')
-                        except:
+                            from zealot_world_pulse import spawn_world_event
+                            row = spawn_world_event(announce=self.irc.say)
+                            if not row:
+                                evt = gen_realm_event_ollama()
+                                if evt:
+                                    self.irc.say(
+                                        f'\u26a0 *REALM EVENT: {evt.get("name", "").replace("_", " ").title()}!* '
+                                        f'{evt.get("description", "")}'
+                                    )
+                                    rpg_log('***', f'Realm event: {evt.get("name", "")}')
+                        except Exception:
                             pass
 
                 # Lore generation: every 8 hours
@@ -6637,19 +7504,24 @@ class RPGEngine:
                     except:
                         pass
 
-                # NPC diary nudge: every hour, 20% chance
+                # NPC blog nudge: hourly, party-first
                 if now - self.last_diary_nudge > 3600:
                     self.last_diary_nudge = now
-                    if random.random() < 0.20 and self.npcs and self.npcs.conns:
+                    if self.npcs and self.npcs.conns:
                         try:
-                            nick = random.choice(list(self.npcs.conns.keys()))
-                            persona = NPC_PERSONAS.get(nick, {})
-                            p = load_player(nick)
-                            history = p.get('history', []) if p else []
-                            diary = gen_npc_diary_ollama(nick, persona, history)
-                            if diary:
-                                publish_npc_blog(nick, persona.get('role', 'adventurer'), f'{nick}\'s Diary', diary, persona=persona)
-                        except:
+                            pool = [
+                                n for n in CRYSTAL_MESH_PARTY_NICKS
+                                if n in self.npcs.conns or n.rstrip('_') in self.npcs.conns
+                            ]
+                            if not pool:
+                                pool = list(self.npcs.conns.keys())
+                            if pool and random.random() < 0.35:
+                                nick = random.choice(pool)
+                                persona = NPC_PERSONAS.get(
+                                    nick.rstrip('_'), NPC_PERSONAS.get(nick, {}),
+                                )
+                                nudge_npc_blog(nick, persona=persona, trigger='diary')
+                        except Exception:
                             pass
 
                 # Rumor generation: every 4 hours
@@ -6688,6 +7560,8 @@ class RPGEngine:
                 try:
                     nick = raw[1:raw.index('!')].split('!')[0]
                     if nick != NICK and nick != f'{NICK}_':
+                        if join_announce_is_ignored(nick, self.npcs):
+                            return
                         entry_msg = random.choice(ENTRY_MESSAGES).format(nick=nick)
                         rpg_log('***', entry_msg)
                         p = load_player(nick)
@@ -6709,6 +7583,11 @@ class RPGEngine:
             if self.npcs and self.npcs.is_npc(nick):
                 return
             rpg_log(nick, msg)
+            try:
+                from zealot_world_pulse import record_channel_memory
+                record_channel_memory(nick, msg, source='irc', channel='rpg')
+            except Exception:
+                pass
             # Human spoke — small budget boost (don't fully reset, prevent spam loops)
             self.block_msg_count = max(0, self.block_msg_count - 1)
             self._process_command(nick, msg)
@@ -7050,13 +7929,13 @@ class RPGEngine:
                             quip = gen_existential_quip(
                                 nick,
                                 f'fighting {battle.monster["name"]} at turn {battle.turn}, '
-                                f'monster HP {battle.monster["hp"]}/{battle.monster["max_hp"]}'
+                                f'monster HP {battle.monster["hp"]}/{battle.monster["max_hp"]}',
+                                persona=persona,
                             )
-                            if not quip:
-                                quip = random.choice(EXISTENTIAL_QUIPS)
-                            irc_conn = self.npcs.conns.get(base) or self.npcs.conns.get(nick)
-                            if irc_conn:
-                                irc_conn.say(f'{persona["cga_prefix"]} *{nick} stares into the void* {quip}')
+                            if quip:
+                                irc_conn = self.npcs.conns.get(base) or self.npcs.conns.get(nick)
+                                if irc_conn:
+                                    irc_conn.say(f'{persona["cga_prefix"]} *{nick} stares into the void* {quip}')
                         else:
                             prompt = (
                                 f'You are fighting {battle.monster["name"]} '
