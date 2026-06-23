@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -43,6 +44,7 @@ from zealot_lcd_render import (
     demoscene_greetz,
     event_lines,
     event_segments,
+    event_display_rows,
     fmt_age_short,
     fmt_duration_short,
     mesh_sync_alert_summary,
@@ -103,19 +105,31 @@ class LcdRenderTests(unittest.TestCase):
 
     def test_event_lines_wrap_overflow_without_animation_fill(self):
         event = LcdEvent("RPG", "#RPG", "LongNick", "alpha " * 80, canon="queued")
-        rows = event_lines(event, WIDTH)
+        rows = event_lines(event, WIDTH, now=None, max_body_lines=4)
         self.assertGreater(len(rows), 1)
-        self.assertTrue(any(row.rstrip().endswith("~") for row, _style in rows))
+        self.assertFalse(any(row.rstrip().endswith("~") for row, _style in rows))
         self.assertTrue(all("_-=" not in row for row, _style in rows))
 
     def test_event_lines_scroll_long_irc_uses_wrap_or_marquee(self):
-        event = LcdEvent("ZP", "#ZealPalace", "Zealot", "alpha " * 80, canon="irc")
-        rows = event_lines(event, WIDTH, now=12.5, max_body_lines=2)
-        self.assertGreaterEqual(len(rows), 1)
-        self.assertLessEqual(len(rows), 2)
-        joined = " ".join(row for row, _style in rows)
+        event = LcdEvent("ZP", "#ZealPalace", "Zealot", "alpha " * 80, canon="irc", sort_ts=1.0)
+        rows = event_display_rows(event, WIDTH, now=12.5, max_body_lines=4)
+        self.assertGreaterEqual(len(rows), 2)
+        joined = " ".join("".join(part for part, _style in row) for row in rows)
         self.assertIn("alpha", joined)
-        self.assertTrue(all(len(row) <= WIDTH for row, _style in rows))
+        styles = {style for row in rows for _text, style in row}
+        self.assertIn("IRC_TIME", styles)
+        self.assertIn("IRC_CHAN", styles)
+
+    def test_event_lines_long_prose_wraps_multiple_rows(self):
+        body = "The Boox NoteAir tower stands vigilant over the archive spire"
+        event = LcdEvent("RPG", "#RPG", "Yomiko", body, canon="queued", sort_ts=100.0)
+        rows = event_display_rows(event, WIDTH, now=200.0, max_body_lines=4)
+        self.assertGreaterEqual(len(rows), 2)
+        joined = " ".join("".join(part for part, _style in row) for row in rows)
+        self.assertIn("Boox", joined)
+        self.assertIn("archive", joined)
+        self.assertNotIn("~", joined)
+        self.assertTrue(any("[#RPG]" in "".join(part for part, _style in row) for row in rows))
 
     def test_frame_is_fixed_size(self):
         snapshot = {
@@ -173,16 +187,32 @@ class LcdRenderTests(unittest.TestCase):
 
     def test_event_segments_color_roles(self):
         event = LcdEvent("ZP", "#ZealPalace", "Zealot", "mesh online", sort_ts=1.0)
-        segments = event_segments(event, WIDTH, now=1.0)
+        segments = event_segments(event, WIDTH, now=100.0)
         styles = {style for _text, style in segments}
         text = "".join(part for part, _style in segments)
-        self.assertNotIn("IRC_TIME", styles)
+        self.assertIn("IRC_TIME", styles)
         self.assertIn("IRC_CHAN", styles)
-        self.assertIn("IRC_MSG", styles)
-        self.assertIn("#ZealPala", text)
-        self.assertNotIn("ZP", text)
-        self.assertNotRegex(text, r"\b\d{2}:\d{2}\b")
-        self.assertLessEqual(sum(len(text) for text, _style in segments), WIDTH)
+        self.assertIn("MAG", styles)
+        self.assertIn("[#ZealPalace]", text)
+        self.assertIn("[1m]", text)
+        self.assertNotRegex(text, r"\[\d{2}:\d{2}\]")
+        self.assertIn("Zealot:", text)
+        self.assertLessEqual(sum(len(part) for part, _style in segments), WIDTH)
+
+    def test_event_nick_per_character_color(self):
+        yomiko = LcdEvent("ZP", "#ZealPalace", "Yomiko", "hello", sort_ts=1.0)
+        chmod = LcdEvent("ZP", "#ZealPalace", "Chmod", "ping", sort_ts=1.0)
+        y_styles = {style for _text, style in event_segments(yomiko, WIDTH, now=100.0)}
+        c_styles = {style for _text, style in event_segments(chmod, WIDTH, now=100.0)}
+        self.assertIn("MAG", y_styles)
+        self.assertIn("RED", c_styles)
+
+    def test_event_full_nick_no_truncation(self):
+        nick = "VeryLongNickName"
+        event = LcdEvent("ZP", "#ZealPalace", nick, "hi", sort_ts=1.0)
+        text = "".join(part for part, _style in event_segments(event, WIDTH, now=100.0))
+        self.assertIn(nick + ":", text)
+        self.assertNotIn("...", text)
 
     def test_uptime_slide_fits_width(self):
         snapshot = {

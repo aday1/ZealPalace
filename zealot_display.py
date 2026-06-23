@@ -18,6 +18,7 @@ from zealot_lcd_render import (
     HEIGHT,
     WIDTH,
     LCD_PANEL_MAX_ROWS,
+    LCD_EVENT_MAX_BODY_LINES,
     SCROLLER_SPEED,
     TICKER_SCROLLER_SPEED,
     compact_status_line,
@@ -26,8 +27,10 @@ from zealot_lcd_render import (
     anim_now,
     calendar_line,
     chunky_scroller,
+    comet_line,
     dashboard_footer_segments,
     event_segments,
+    event_display_rows,
     event_lines,
     fit,
     gpu_summary,
@@ -246,7 +249,7 @@ def attr_for(style: str, bold: bool = False, now: float | None = None, row: int 
         attr |= curses.A_BOLD
     if style in ("MOTD", "GREETZ", "MOTIVE", "IRC_MSG"):
         attr |= curses.A_BOLD
-    if style in ("IRC_CHAN", "IRC_NICK", "ZP", "ZH", "RPG", "ST", "PBX", "GREEN", "YELLOW", "RED"):
+    if style in ("IRC_CHAN", "IRC_NICK", "ZP", "ZH", "RPG", "ST", "PBX", "NOC", "CYAN", "MAG", "RGB", "GREEN", "YELLOW", "RED"):
         attr |= curses.A_BOLD
     if style == "MOTD_FX":
         attr |= curses.A_DIM
@@ -510,19 +513,20 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
 
     # --- Events zone (reserved rows, tail-pinned, colored segments) ---
     add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
-    event_slot_rows: list[tuple[str, str]] = []
+    event_slot_rows: list[list[tuple[str, str]]] = []
     for event in snapshot.get("events") or []:
         if event_is_recurring_noise(event):
             continue
-        for row_text, row_style in event_lines(event, frame_w, now=now, max_body_lines=2):
-            event_slot_rows.append((row_text, row_style))
+        event_slot_rows.extend(
+            event_display_rows(event, frame_w, now=now, max_body_lines=LCD_EVENT_MAX_BODY_LINES)
+        )
     event_slots = max(1, zones["events_end"] - zones["events_start"])
     event_slot_rows = event_slot_rows[-event_slots:]
-    for idx, (text, style) in enumerate(event_slot_rows):
+    for idx, segments in enumerate(event_slot_rows):
         row = zones["events_start"] + idx
         if row >= zones["events_end"]:
             break
-        add_line(stdscr, row, text, style, raw=True, now=now)
+        add_segment_line(stdscr, row, segments, now=now)
 
     if input_buf:
         input_text = fit("> " + input_buf[-(frame_w - 3) :], frame_w)

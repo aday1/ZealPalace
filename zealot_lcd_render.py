@@ -55,6 +55,38 @@ LCD_PANEL_MAX_ROWS = 7
 LCD_MID_FOOTER_ROWS = 2
 LCD_EVENTS_HEADER_ROWS = 1
 LCD_EVENTS_MIN_ROWS = 8
+LCD_EVENT_MAX_BODY_LINES = 4
+
+# Per-IRC-nick CGA color (Crystal Mesh party + terrarium NPCs).
+IRC_NICK_STYLES: dict[str, str] = {
+    "yomiko": "MAG",
+    "rei": "CYAN",
+    "nyx": "RGB",
+    "mira": "GREEN",
+    "misato": "YELLOW",
+    "celes": "ST",
+    "holybell": "ZH",
+    "vexara": "PBX",
+    "aeris": "NOC",
+    "zealot": "MAG",
+    "chmod": "RED",
+    "n0va": "CYAN",
+    "nova": "CYAN",
+    "glitchgrl": "RGB",
+    "pixel": "GREEN",
+    "lyric": "ST",
+    "riff": "PBX",
+    "vendor": "YELLOW",
+    "cleric": "GREEN",
+    "sybil": "MAG",
+    "vex": "RGB",
+    "index": "CYAN",
+    "botmcbotface": "PBX",
+    "joshua": "RED",
+    "grepzilla": "GREEN",
+    "kernelix": "CYAN",
+    "spectralbyte": "MAG",
+}
 
 
 def lcd_frame_cols(fallback: int = WIDTH) -> int:
@@ -2020,7 +2052,7 @@ def first_disk_pct(host: dict[str, Any], path: str = "/") -> Any:
     return None
 
 
-def wrap_line(text: str, width: int = WIDTH, max_lines: int = 3) -> list[str]:
+def wrap_line(text: str, width: int = WIDTH, max_lines: int = 3, *, truncate: bool = True) -> list[str]:
     clean = re.sub(r"\s+", " ", text or "").strip()
     if not clean:
         return [""]
@@ -2032,7 +2064,10 @@ def wrap_line(text: str, width: int = WIDTH, max_lines: int = 3) -> list[str]:
     ) or [clean[:width]]
     if len(chunks) > max_lines:
         chunks = chunks[:max_lines]
-        chunks[-1] = fit(chunks[-1], width).rstrip()[: max(0, width - 1)] + "~"
+        if truncate:
+            chunks[-1] = fit(chunks[-1], width).rstrip()[: max(0, width - 1)] + "~"
+        else:
+            chunks[-1] = chunks[-1][:width]
     return chunks
 
 
@@ -2065,6 +2100,143 @@ def event_canon_suffix(event: LcdEvent) -> str:
     return ""
 
 
+def compact_tail(text: str, width: int) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(clean) <= width:
+        return clean
+    if width <= 3:
+        return clean[:width]
+    return clean[: width - 3].rstrip() + "..."
+
+
+def event_age_seconds(event: LcdEvent, now: float) -> float | None:
+    ts = event.sort_ts
+    if ts <= 0 and event.ts:
+        ts = parse_iso_ts(event.ts)
+    if ts <= 0:
+        return None
+    return max(0.0, now - ts)
+
+
+def event_channel_bracket(channel: str) -> str:
+    chan = str(channel or "").strip()
+    if not chan:
+        return ""
+    if chan == "bridge:lore":
+        return "[lore]"
+    return f"[{chan}]"
+
+
+def event_prefix_segments(
+    event: LcdEvent,
+    now: float,
+    width: int = WIDTH,
+) -> list[tuple[str, str]]:
+    parts: list[tuple[str, str]] = []
+    age = event_age_seconds(event, now)
+    if age is not None:
+        parts.append((f"[{fmt_age_short(age)}]", "IRC_TIME"))
+    canon = event_canon_suffix(event)
+    if canon:
+        parts.append((canon, "SYS"))
+    bracket = event_channel_bracket(event.channel)
+    if bracket:
+        parts.append((" " + bracket if parts else bracket, "IRC_CHAN"))
+    return parts
+
+
+def _wrap_event_body(
+    body: str,
+    first_width: int,
+    cont_width: int,
+    max_lines: int,
+) -> list[str]:
+    clean = re.sub(r"\s+", " ", str(body or "")).strip()
+    if not clean:
+        return [""]
+    lines: list[str] = []
+    pos = 0
+    for idx in range(max(1, max_lines)):
+        room = first_width if idx == 0 else cont_width
+        if pos >= len(clean):
+            break
+        wrapped = textwrap.wrap(
+            clean[pos:],
+            width=room,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+        if not wrapped:
+            break
+        chunk = wrapped[0]
+        lines.append(chunk)
+        pos += len(chunk)
+        while pos < len(clean) and clean[pos] == " ":
+            pos += 1
+    return lines or [""]
+
+
+def _event_nick_label(event: LcdEvent) -> str:
+    return (event.nick or event.channel.strip("#") or event.kind or "").strip()
+
+
+def event_nick_style(event: LcdEvent) -> str:
+    nick = _event_nick_label(event).lower().rstrip("_")
+    if nick in IRC_NICK_STYLES:
+        return IRC_NICK_STYLES[nick]
+    if nick:
+        idx = sum(ord(ch) for ch in nick) % len(COMPANION_LINE_COLORS)
+        return COMPANION_LINE_COLORS[idx]
+    return {
+        "ZP": "ZP",
+        "ZH": "ZH",
+        "RPG": "RPG",
+        "ST": "ST",
+        "PCORP": "PBX",
+        "GMQ": "GMQ",
+    }.get(event.source, "IRC_NICK")
+
+
+def event_display_rows(
+    event: LcdEvent,
+    width: int = WIDTH,
+    now: float | None = None,
+    max_body_lines: int = LCD_EVENT_MAX_BODY_LINES,
+) -> list[list[tuple[str, str]]]:
+    now_ts = time.time() if now is None else now
+    body = re.sub(r"\s+", " ", str(event.text or "")).strip()
+    nick = _event_nick_label(event)
+    nick_style = event_nick_style(event)
+
+    if event.kind in ("presence", "status") and not body:
+        body = f"{nick} {event.kind}".strip()
+
+    meta = event_prefix_segments(event, now_ts, width)
+    nick_segments: list[tuple[str, str]] = []
+    msg_style = nick_style if nick else "IRC_MSG"
+    if event.kind == "action":
+        msg_style = "IRC_ACT" if not nick else nick_style
+        if nick:
+            nick_segments = [(" *" + nick + " ", nick_style)]
+    elif event.kind not in ("presence", "status") and nick:
+        nick_segments = [(" " + nick + ": ", nick_style)]
+
+    prefix_len = sum(len(text) for text, _style in meta + nick_segments)
+    first_room = max(1, width - prefix_len)
+    body_lines = _wrap_event_body(body, first_room, width, max(1, max_body_lines))
+
+    rows: list[list[tuple[str, str]]] = []
+    for idx, chunk in enumerate(body_lines):
+        if idx == 0:
+            segments = [*meta, *nick_segments, (chunk, msg_style)]
+        else:
+            segments = [(chunk, msg_style)]
+        rows.append(pad_colored_segments(segments, width))
+    if not rows:
+        rows.append(pad_colored_segments([*meta, *nick_segments], width))
+    return rows
+
+
 def event_channel_short(channel: str) -> str:
     chan = str(channel or "").strip()
     if not chan:
@@ -2083,61 +2255,15 @@ def event_channel_short(channel: str) -> str:
     return chan[:9]
 
 
-def event_nick_style(event: LcdEvent) -> str:
-    return {
-        "ZP": "ZP",
-        "ZH": "ZH",
-        "RPG": "RPG",
-        "ST": "ST",
-        "PCORP": "PBX",
-        "GMQ": "GMQ",
-    }.get(event.source, "IRC_NICK")
-
-
 def event_segments(
     event: LcdEvent,
     width: int = WIDTH,
     now: float | None = None,
 ) -> list[tuple[str, str]]:
-    canon = event_canon_suffix(event)
-    chan = event_channel_short(event.channel)
-    nick = event.nick or ""
-    body = re.sub(r"\s+", " ", str(event.text or "")).strip()
-
-    segments: list[tuple[str, str]] = []
-    if canon:
-        segments.append((canon, "SYS"))
-    if chan:
-        segments.append((" " + chan if segments else chan, "IRC_CHAN"))
-
-    if event.kind == "action":
-        segments.append((" ", "SYS"))
-        if nick:
-            segments.append(("*" + nick[:8] + " ", event_nick_style(event)))
-        msg_style = "IRC_ACT"
-    elif event.kind in ("presence", "status"):
-        msg_style = "IRC_MSG"
-        if not body:
-            body = f"{nick} {event.kind}".strip()
-    else:
-        if nick:
-            segments.append((" " + nick[:8] + ": ", event_nick_style(event)))
-        msg_style = "IRC_MSG"
-
-    prefix = "".join(text for text, _style in segments)
-    room = max(1, width - len(prefix))
-    if now is not None and len(body) > room:
-        body_disp = marquee(body, room, speed=IRC_SCROLL_SPEED, now=now)
-    else:
-        body_disp = fit(body, room)
-    segments.append((body_disp, msg_style))
-
-    total = sum(len(text) for text, _style in segments)
-    if total > width:
-        trim = total - width
-        last_text, last_style = segments[-1]
-        segments[-1] = (last_text[: max(0, len(last_text) - trim)], last_style)
-    return segments
+    rows = event_display_rows(event, width, now=now, max_body_lines=1)
+    if rows:
+        return rows[0]
+    return [("", "SYS")]
 
 
 def event_head(event: LcdEvent) -> str:
@@ -2148,38 +2274,23 @@ def event_head(event: LcdEvent) -> str:
     if chan:
         prefix += (" " if prefix else "") + chan
     if event.kind == "action":
-        return prefix + " *" + nick[:8] + " "
+        return prefix + " *" + nick + " "
     if event.kind in ("presence", "status"):
         return prefix + " "
-    return prefix + (" " if prefix else "") + (nick[:10] + ": " if nick else "")
+    return prefix + (" " if prefix else "") + (nick + ": " if nick else "")
 
 
 def event_lines(
     event: LcdEvent,
     width: int = WIDTH,
     now: float | None = None,
-    max_body_lines: int = 2,
+    max_body_lines: int = LCD_EVENT_MAX_BODY_LINES,
 ) -> list[tuple[str, str]]:
-    head = event_head(event)
-    body = re.sub(r"\s+", " ", str(event.text or "")).strip()
-    room = max(6, width - len(head))
-    body = short_text(body, 400)
-    chunks = wrap_line(body, room, max_lines=max_body_lines)
-    if not chunks:
-        chunks = [""]
-    out: list[tuple[str, str]] = []
-    out.append((fit(head + chunks[0], width), event.source))
-    indent = " " * min(len(head), width - 1)
-    joined = " ".join(chunks)
-    for idx, chunk in enumerate(chunks[1:], start=1):
-        line_body = chunk
-        if idx == len(chunks) - 1 and now is not None and len(joined) > room * max_body_lines:
-            used = sum(len(c) + (1 if i else 0) for i, c in enumerate(chunks[:-1]))
-            remainder = body[used:].strip() if used < len(body) else ""
-            if len(remainder) > room:
-                line_body = marquee(remainder, room, speed=IRC_SCROLL_SPEED, now=now)
-        out.append((fit(indent + line_body, width), event.source))
-    return out
+    rows: list[tuple[str, str]] = []
+    for segments in event_display_rows(event, width, now=now, max_body_lines=max_body_lines):
+        text = "".join(part for part, _style in segments)
+        rows.append((pad(text, width), event.source))
+    return rows
 
 
 def newest(events: list[LcdEvent], source: str | None = None, n: int = 3) -> list[LcdEvent]:
@@ -2805,7 +2916,7 @@ def bridge_panel(bridge: dict[str, Any], width: int, now: float | None = None) -
     ]
 
 
-def lounge_panel(events: list[LcdEvent], width: int, now: float | None = None) -> list[tuple[str, str]]:
+def lounge_panel(events: list[LcdEvent], width: int, now: float | None = None) -> list[tuple[DetailRow, str]]:
     ts = time.time() if now is None else now
     chosen = [
         event
@@ -2813,12 +2924,17 @@ def lounge_panel(events: list[LcdEvent], width: int, now: float | None = None) -
         if event.source in ("ZH", "ZP", "ST", "RPG", "PCORP", "IRC")
         and event.kind not in ("presence", "status")
     ][-3:]
-    lines: list[tuple[str, str]] = [
+    lines: list[tuple[DetailRow, str]] = [
         (detail_kv_header(width), "CYAN"),
         (detail_kv_rule(width), "SYS"),
     ]
     for event in chosen:
-        lines.extend(event_lines(event, width, now=ts)[:1])
+        for seg_row in event_display_rows(event, width, now=ts, max_body_lines=LCD_EVENT_MAX_BODY_LINES):
+            lines.append((seg_row, event_nick_style(event)))
+            if len(lines) >= 7:
+                break
+        if len(lines) >= 7:
+            break
     while len(lines) < 7:
         lines.append((pad("", width), "SYS"))
     return lines[:7]
