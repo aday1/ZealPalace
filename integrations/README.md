@@ -30,6 +30,17 @@ Expected post-sync bridge health:
 {"ok":true,"ircReady":true,"characters":37,"characterSource":"png-card-metadata","worlds":43}
 ```
 
+Run the live regression guard after syncs, bridge deploys, or ZealTower restarts:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:/aday.repo/ZealPalace/integrations/test-sillytavern-source-health.ps1
+```
+
+The guard fails if the bridge falls back to default/sample character state,
+stops reading PNG card metadata, loses Crystal aliases, drops below 37 cards,
+loses source worldbook coverage, loses its ZealTower manifest, or the
+SillyTavern UI/bridge process is down.
+
 Deploy bridge-only changes with:
 
 ```powershell
