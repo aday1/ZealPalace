@@ -101,7 +101,12 @@ SERVICE_NAME='__SERVICE_NAME__'
 CARD_INSPECT='/home/node/app/public/scripts/extensions/third-party/zealpalace-rp-suite/inspect-cards.mjs'
 install -m 0755 /tmp/sillytavern-zeal-rpg-bridge.mjs "$BRIDGE_DIR/sillytavern-zeal-rpg-bridge.mjs"
 node --check "$BRIDGE_DIR/sillytavern-zeal-rpg-bridge.mjs"
-node /tmp/patch-sillytavern-rp-suite.cjs "$EXTENSION_DIR/index.js"
+if [ -f "$EXTENSION_DIR/index.js" ]; then
+    node /tmp/patch-sillytavern-rp-suite.cjs "$EXTENSION_DIR/index.js"
+else
+    echo "SillyTavern zealpalace-rp-suite UI extension not present"
+    echo "Bridge will use direct PNG card metadata."
+fi
 
 restart_sillytavern() {
     systemctl restart sillytavern 2>/dev/null || docker restart sillytavern >/dev/null
@@ -109,7 +114,11 @@ restart_sillytavern() {
 
 wait_for_cards() {
     for attempt in 1 2 3 4 5 6 7 8 9 10; do
-        if docker exec sillytavern node "$CARD_INSPECT" >/dev/null 2>&1; then
+        if docker exec sillytavern test -f "$CARD_INSPECT" >/dev/null 2>&1 &&
+            docker exec sillytavern node "$CARD_INSPECT" >/dev/null 2>&1; then
+            return 0
+        fi
+        if find /opt/sillytavern/data/default-user/characters -maxdepth 1 -type f -name '*.png' | grep -q .; then
             return 0
         fi
         sleep 2

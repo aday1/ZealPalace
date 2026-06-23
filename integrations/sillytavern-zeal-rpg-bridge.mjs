@@ -57,6 +57,7 @@ const state = {
   cfg: null,
   token: '',
   characters: [],
+  characterSource: 'none',
   worlds: [],
   recent: [],
   irc: null,
@@ -130,11 +131,136 @@ function aliasesFor(character) {
     const fileFirst = fileBase.split(' ')[0];
     if (fileFirst) out.add(fileFirst);
   }
+  for (const value of [
+    character.slug,
+    character.ext,
+    character.ircNick,
+    character.short,
+    ...(Array.isArray(character.tags) ? character.tags : []),
+  ]) {
+    const alias = normalizeName(value);
+    if (alias) out.add(alias);
+  }
   return [...out];
+}
+
+function getCardPayloadField(payload, key) {
+  if (!payload || typeof payload !== 'object') return '';
+  const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+  return data[key] ?? payload[key] ?? '';
+}
+
+function decodeCardPayload(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      return JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+    } catch {
+      return null;
+    }
+  }
+}
+
+function readPngTextChunks(buffer) {
+  const chunks = new Map();
+  const signature = buffer.subarray(0, 8).toString('hex');
+  if (signature !== '89504e470d0a1a0a') return chunks;
+
+  let offset = 8;
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.subarray(offset + 4, offset + 8).toString('latin1');
+    const start = offset + 8;
+    const end = start + length;
+    if (end + 4 > buffer.length) break;
+
+    if (type === 'tEXt') {
+      const data = buffer.subarray(start, end);
+      const nul = data.indexOf(0);
+      if (nul >= 0) {
+        const key = data.subarray(0, nul).toString('utf8');
+        chunks.set(key, data.subarray(nul + 1).toString('utf8'));
+      }
+    }
+
+    offset = end + 4;
+    if (type === 'IEND') break;
+  }
+  return chunks;
+}
+
+async function readCharacterCard(filePath, file) {
+  const buffer = await fs.readFile(filePath);
+  const chunks = readPngTextChunks(buffer);
+  const payload = decodeCardPayload(chunks.get('ccv3')) || decodeCardPayload(chunks.get('chara'));
+  if (!payload) {
+    const name = file.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+    return { file, name, aliases: aliasesFor({ file, name }) };
+  }
+
+  const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+  const extensions = data.extensions || payload.extensions || {};
+  const zeal = extensions.zealpalace || {};
+  const tags = [
+    ...(Array.isArray(data.tags) ? data.tags : []),
+    ...(Array.isArray(payload.tags) ? payload.tags : []),
+  ].filter(Boolean);
+  const row = {
+    file,
+    name: trimText(getCardPayloadField(payload, 'name'), 120),
+    description: trimText(getCardPayloadField(payload, 'description'), 2400),
+    personality: trimText(getCardPayloadField(payload, 'personality'), 1600),
+    scenario: trimText(getCardPayloadField(payload, 'scenario'), 1200),
+    first_mes: trimText(getCardPayloadField(payload, 'first_mes'), 900),
+    mes_example: trimText(getCardPayloadField(payload, 'mes_example'), 1200),
+    tags: [...new Set(tags)],
+    slug: zeal.slug || data.slug || payload.slug || '',
+    ext: zeal.ext || data.ext || payload.ext || '',
+    type: zeal.type || data.type || payload.type || '',
+    voice: zeal.voice || data.voice || payload.voice || '',
+    voiceSignature: zeal.voice_signature || data.voice_signature || payload.voice_signature || '',
+    ircNick: zeal.irc_nick || zeal.crystal_party?.irc_nick || data.irc_nick || payload.irc_nick || '',
+    short: zeal.short || zeal.crystal_party?.short || data.short || payload.short || '',
+    sourceUrl: zeal.public_card_url || data.source_url || payload.source_url || '',
+    aliases: [],
+  };
+  row.aliases = aliasesFor(row);
+  return row;
+}
+
+async function loadCharactersFromCards(charDir) {
+  const files = await fs.readdir(charDir, { withFileTypes: true });
+  const cards = [];
+  for (const entry of files) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.png')) continue;
+    try {
+      const card = await readCharacterCard(path.join(charDir, entry.name), entry.name);
+      if (card.name) cards.push(card);
+    } catch (error) {
+      log(`card parse failed for ${entry.name}`, error.message);
+    }
+  }
+  cards.sort((a, b) => String(a.ext || a.name).localeCompare(String(b.ext || b.name), undefined, { numeric: true }));
+  return cards;
 }
 
 async function loadCharacters() {
   const cfg = state.cfg;
+  const charDir = path.join(cfg.sillytavern.dataRoot, 'characters');
+  try {
+    state.characters = await loadCharactersFromCards(charDir);
+    if (state.characters.length > 0) {
+      state.characterSource = 'png-card-metadata';
+      log(`loaded ${state.characters.length} SillyTavern characters from PNG cards`);
+      return state.characters;
+    }
+  } catch (error) {
+    log('character card load failed', error.message);
+  }
+
   const scriptPath = `${cfg.sillytavern.extensionPath}/inspect-cards.mjs`;
   try {
     const { stdout } = await execFileAsync(
@@ -156,25 +282,14 @@ async function loadCharacters() {
         tags: row.tags || [],
         aliases: aliasesFor(row),
       }));
-    log(`loaded ${state.characters.length} SillyTavern characters`);
-    return state.characters;
+    state.characterSource = 'extension-export';
+    log(`loaded ${state.characters.length} SillyTavern characters from extension export`);
   } catch (error) {
-    log('character export failed', error.message);
-    const charDir = path.join(cfg.sillytavern.dataRoot, 'characters');
-    try {
-      const files = await fs.readdir(charDir);
-      state.characters = files
-        .filter((file) => file.endsWith('.png'))
-        .map((file) => {
-          const name = file.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
-          const row = { file, name };
-          return { ...row, aliases: aliasesFor(row) };
-        });
-    } catch {
-      state.characters = [];
-    }
-    return state.characters;
+    log('character extension export failed', error.message);
+    state.characters = [];
+    state.characterSource = 'none';
   }
+  return state.characters;
 }
 
 async function loadWorlds() {
@@ -587,6 +702,7 @@ function startHttp() {
           ok: true,
           ircReady: state.ircReady,
           characters: state.characters.length,
+          characterSource: state.characterSource,
           worlds: state.worlds.length,
           recent: state.recent.length,
         }, origin);
@@ -605,6 +721,12 @@ function startHttp() {
             name: character.name,
             file: character.file,
             tags: character.tags,
+            slug: character.slug,
+            ext: character.ext,
+            type: character.type,
+            voice: character.voice,
+            ircNick: character.ircNick,
+            sourceUrl: character.sourceUrl,
           })),
         }, origin);
         return;
