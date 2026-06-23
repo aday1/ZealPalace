@@ -68,24 +68,30 @@ IRC_NICK_STYLES: dict[str, str] = {
     "holybell": "ZH",
     "vexara": "PBX",
     "aeris": "NOC",
-    "zealot": "MAG",
+    "zealot": "ZP",
     "chmod": "RED",
-    "n0va": "CYAN",
-    "nova": "CYAN",
-    "glitchgrl": "RGB",
-    "pixel": "GREEN",
-    "lyric": "ST",
-    "riff": "PBX",
+    "n0va": "TICK",
+    "nova": "TICK",
+    "glitchgrl": "GMQ",
+    "pixel": "RPG",
+    "lyric": "ART",
+    "riff": "GREEN",
     "vendor": "YELLOW",
-    "cleric": "GREEN",
+    "cleric": "ST",
     "sybil": "MAG",
     "vex": "RGB",
     "index": "CYAN",
-    "botmcbotface": "PBX",
+    "botmcbotface": "LOG",
     "joshua": "RED",
     "grepzilla": "GREEN",
     "kernelix": "CYAN",
     "spectralbyte": "MAG",
+    "dark": "RED",
+    "sage": "YELLOW",
+    "glitch": "GMQ",
+    "dm": "PBX",
+    "rift": "CYAN",
+    "hex": "RGB",
 }
 
 
@@ -114,7 +120,17 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0617d"
+LCD_TICKER_VERSION = "tkr0624a"
+TICKER_FRAME_PERIOD_SEC = 8.0
+FLOURISH_BURST_PERIOD_SEC = 12.0
+FLOURISH_BURST_WINDOW_SEC = 2.5
+FLOURISH_TICK_SEC = 0.35
+FLOURISH_BRACKET_PAIRS: tuple[tuple[str, str], ...] = (
+    ("<", ">"),
+    ("[", "]"),
+    ("{", "}"),
+    ("(", ")"),
+)
 WORK_OPEN_HOUR = 10
 WORK_CLOSE_HOUR = 17
 AGENT_CALL_FRESH_SEC = 2 * 3600
@@ -235,15 +251,22 @@ DISK_USAGE_CRIT_PCT = 90.0
 
 # Per-companion CGA colors for the COMPANIONS scroller (Crystal Mesh 690-698).
 COMPANION_LINE_COLORS: tuple[str, ...] = (
-    "ST",
-    "PBX",
-    "RPG",
-    "ZP",
-    "NOC",
     "MAG",
-    "ZH",
-    "YELLOW",
     "CYAN",
+    "RGB",
+    "GREEN",
+    "YELLOW",
+    "ST",
+    "ZH",
+    "PBX",
+    "NOC",
+    "ZP",
+    "RED",
+    "RPG",
+    "GMQ",
+    "TICK",
+    "ART",
+    "LOG",
 )
 
 
@@ -287,11 +310,31 @@ def fmt_duration_short(seconds: Any) -> str:
 
 def calendar_line(now: float | None = None, width: int = WIDTH) -> str:
     ts = time.time() if now is None else now
+    return "".join(text for text, _style in calendar_segments(ts, width))
+
+
+def normalize_line(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def calendar_segments(now: float | None = None, width: int = WIDTH) -> list[tuple[str, str]]:
+    """Calendar row — centered date bracket + work-week ANSI bar."""
+    ts = time.time() if now is None else now
     dt = datetime.fromtimestamp(ts)
     month = MONTH_NAMES[max(0, min(11, dt.month - 1))]
-    iso_week = max(1, min(52, int(dt.isocalendar().week)))
-    text = f"{dt:%a} {dt.day:02d} {month} W{iso_week:02d}/52"
-    return fit(text, width)
+    core = f"{dt:%a} {dt.day:02d} {month}"
+    wk_room = max(12, min(22, (width * 9) // 20))
+    date_room = max(10, width - wk_room - 1)
+    date_segs = flourished_title_segments(
+        core,
+        ts,
+        width,
+        salt="calendar",
+        title_style="CYAN",
+        pad_to=date_room,
+    )
+    week_segs = work_week_compact_segments(ts, wk_room)
+    return justify_colored_segments([*date_segs, (" ", "SYS"), *week_segs], width, align="center")
 
 
 def _weekly_milestones(dt: datetime) -> tuple[datetime, datetime, datetime]:
@@ -326,33 +369,418 @@ def _span_pct(start: datetime, end: datetime, dt: datetime) -> float:
 
 
 def work_week_countdown_line(now: float | None = None, width: int = WIDTH) -> str:
-    """Row 0: work-week progress toward Friday 5PM (weeklybeats window)."""
     ts = time.time() if now is None else now
-    dt = datetime.fromtimestamp(ts)
-    mon_10, fri_17, _next_mon_10 = _weekly_milestones(dt)
-    bar_w = 8
-    if work_week_phase(dt) == "work":
-        pct = _span_pct(mon_10, fri_17, dt)
-        left = max(0, int((fri_17 - dt).total_seconds()))
-        text = f"WK {ascii_bar(pct, bar_w)} {int(round(pct)):2d}% FRI {fmt_duration_short(left)}"
-    else:
-        text = f"WK {ascii_bar(100, bar_w)} DONE"
-    return fit(text, width)
+    return "".join(text for text, _style in work_week_compact_segments(ts, width))
 
 
 def weekend_monday_countdown_line(now: float | None = None, width: int = WIDTH) -> str:
-    """Row 1: weekend progress toward Monday 10AM (quiet during work week)."""
+    ts = time.time() if now is None else now
+    return "".join(text for text, _style in weekend_monday_countdown_segments(ts, width))
+
+
+def work_week_progress(dt: datetime) -> tuple[float, int, str, str, str]:
+    """Return pct_val, pct_int, countdown, phase tag, bar color for the active week phase."""
+    mon_10, fri_17, next_mon_10 = _weekly_milestones(dt)
+    if work_week_phase(dt) == "work":
+        pct_val = _span_pct(mon_10, fri_17, dt)
+        left = max(0, int((fri_17 - dt).total_seconds()))
+        return pct_val, int(round(pct_val)), fmt_duration_short(left), "WORK", "GREEN"
+    pct_val = _span_pct(fri_17, next_mon_10, dt)
+    left = max(0, int((next_mon_10 - dt).total_seconds()))
+    return pct_val, int(round(pct_val)), fmt_duration_short(left), "TO-MON", "MAG"
+
+
+def progress_bar_segments(
+    pct: float,
+    width: int,
+    fill_style: str,
+    empty_style: str = "SYS",
+) -> list[tuple[str, str]]:
+    w = max(6, width)
+    inner = max(4, w - 2)
+    clamped = max(0.0, min(100.0, float(pct)))
+    filled = int(round((clamped / 100.0) * inner))
+    if clamped > 0.0 and filled == 0:
+        filled = 1
+    empty = max(0, inner - filled)
+    return [
+        ("*", fill_style),
+        ("#" * filled, fill_style),
+        ("-" * empty, empty_style),
+        ("*", fill_style),
+    ]
+
+
+def flourish_pulse(now: float, period: float = FLOURISH_BURST_PERIOD_SEC) -> float:
+    t = float(now) % period
+    start = period - FLOURISH_BURST_WINDOW_SEC
+    if t < start:
+        return 0.0
+    x = (t - start) / FLOURISH_BURST_WINDOW_SEC
+    return x * x * (3.0 - 2.0 * x)
+
+
+def flourish_tick(now: float) -> int:
+    return int(float(now) / FLOURISH_TICK_SEC)
+
+
+def flourish_bracket_pair(now: float, salt: str = "") -> tuple[str, str]:
+    idx = (flourish_tick(now) + (zlib.crc32(salt.encode()) & 0xFF)) % len(FLOURISH_BRACKET_PAIRS)
+    return FLOURISH_BRACKET_PAIRS[idx]
+
+
+def flourish_spark(now: float, offset: int = 0) -> str:
+    tick = flourish_tick(now) + offset
+    return SCROLLER_FX_GLINT[tick % len(SCROLLER_FX_GLINT)]
+
+
+def flourish_bar_brackets(now: float, salt: str) -> tuple[str, str, str]:
+    pulse = flourish_pulse(now)
+    lb, rb = flourish_bracket_pair(now, salt)
+    style = "YELLOW" if pulse > 0.4 else "MOTD_FX"
+    return lb, rb, style
+
+
+def countdown_tail_segments(
+    pct: int,
+    dur: str,
+    now: float,
+    base_style: str = "CYAN",
+) -> list[tuple[str, str]]:
+    pulse = flourish_pulse(now)
+    pct_txt = f" {pct}%"
+    dur_txt = f" {dur}"
+    dur_style = "YELLOW" if pulse > 0.45 else base_style
+    if pulse > 0.7:
+        dur_style = "GREEN"
+    segments: list[tuple[str, str]] = [(pct_txt, base_style)]
+    if pulse > 0.8:
+        segments.append((flourish_spark(now, 1), "MAG"))
+    segments.append((dur_txt, dur_style))
+    return segments
+
+
+def justify_colored_segments(
+    segments: list[tuple[str, str]],
+    width: int,
+    align: str = "left",
+    pad_style: str = "MOTD_FX",
+    pad_chars: str | None = None,
+) -> list[tuple[str, str]]:
+    chars = pad_chars or SCROLLER_FX_EDGE
+    total = sum(len(text) for text, _style in segments)
+    if total >= width:
+        return pad_colored_segments(segments, width)
+    room = width - total
+    if align == "center":
+        left_n = room // 2
+        right_n = room - left_n
+    elif align == "right":
+        left_n = room
+        right_n = 0
+    else:
+        left_n = 0
+        right_n = room
+
+    def fx_run(count: int) -> list[tuple[str, str]]:
+        if count <= 0:
+            return []
+        text = "".join(chars[i % len(chars)] for i in range(count))
+        return [(text, pad_style)]
+
+    return pad_colored_segments([*fx_run(left_n), *segments, *fx_run(right_n)], width)
+
+
+def center_colored_segments(segments: list[tuple[str, str]], width: int) -> list[tuple[str, str]]:
+    return justify_colored_segments(segments, width, align="center")
+
+
+def flourished_title_segments(
+    label: str,
+    now: float,
+    width: int,
+    salt: str = "hdr",
+    title_style: str = "CYAN",
+    pad_to: int | None = None,
+) -> list[tuple[str, str]]:
+    pulse = flourish_pulse(now)
+    lb, rb = flourish_bracket_pair(now, salt)
+    bracket_style = "YELLOW" if pulse > 0.55 else "MOTD_FX"
+    spark_style = "MAG" if pulse > 0.75 else "MOTD_FX"
+    frame_w = width if pad_to is None else pad_to
+    title_room = max(1, frame_w - 8)
+    core = normalize_line(label)
+    if len(core) > title_room:
+        core = core[:title_room]
+
+    segments: list[tuple[str, str]] = [(lb, bracket_style)]
+    if pulse > 0.35:
+        segments.append((flourish_spark(now), spark_style))
+    segments.append((" ", "SYS"))
+
+    if pulse > 0.2 and core:
+        hi = min(len(core) - 1, int(pulse * len(core) * 1.4))
+        for i, ch in enumerate(core):
+            segments.append((ch, "GLINT" if i == hi else title_style))
+    else:
+        segments.append((core, title_style))
+
+    segments.append((" ", "SYS"))
+    if pulse > 0.35:
+        segments.append((flourish_spark(now, 2), spark_style))
+    segments.append((rb, bracket_style))
+    if pad_to is None:
+        return segments
+    return justify_colored_segments(segments, pad_to, align="center")
+
+
+def work_week_rail_segments(
+    now: float,
+    width: int,
+    *,
+    compact: bool = False,
+    pad_to_width: bool = True,
+) -> list[tuple[str, str]]:
+    if width < 10:
+        return [(fit("?", width), "YELLOW")]
+    dt = datetime.fromtimestamp(now)
+    pct_val, pct, dur, _phase, bar_style = work_week_progress(dt)
+    tail_opts = (f" {pct}% {dur}", f" {pct}%", f" {dur}", "")
+    for tail in tail_opts:
+        prefix_segs: list[tuple[str, str]] = []
+        close_segs: list[tuple[str, str]] = []
+        prefix_len = 0
+        close_len = 0
+        if not compact:
+            open_b, close_b, bstyle = flourish_bar_brackets(now, "work-week")
+            prefix_segs = [(open_b, bstyle)]
+            close_segs = [(close_b, bstyle)]
+            prefix_len = len(open_b)
+            close_len = len(close_b)
+        overhead = prefix_len + close_len + len(tail)
+        bar_w = max(6, width - overhead)
+        if bar_w >= 6 or not tail:
+            segments: list[tuple[str, str]] = [
+                *prefix_segs,
+                *progress_bar_segments(pct_val, bar_w, bar_style),
+                *close_segs,
+            ]
+            if tail:
+                segments.extend(countdown_tail_segments(pct, dur, now, "CYAN"))
+            if pad_to_width:
+                return pad_colored_segments(segments, width)
+            return segments
+    return [(fit("?", width), "YELLOW")]
+
+
+def work_week_compact_segments(now: float, width: int) -> list[tuple[str, str]]:
+    return work_week_rail_segments(now, width, compact=False, pad_to_width=True)
+
+
+def weekend_monday_countdown_segments(
+    now: float | None = None,
+    width: int = WIDTH,
+) -> list[tuple[str, str]]:
     ts = time.time() if now is None else now
     dt = datetime.fromtimestamp(ts)
-    mon_10, fri_17, next_mon_10 = _weekly_milestones(dt)
-    bar_w = 8
-    left = max(0, int((next_mon_10 - dt).total_seconds()))
-    if work_week_phase(dt) == "work":
-        text = f"MON {ascii_bar(0, bar_w)} MON {fmt_duration_short(left)}"
-    else:
-        pct = _span_pct(fri_17, next_mon_10, dt)
-        text = f"MON {ascii_bar(pct, bar_w)} {int(round(pct)):2d}% MON {fmt_duration_short(left)}"
-    return fit(text, width)
+    pct_val, pct, dur, phase, bar_style = work_week_progress(dt)
+    in_weekend = work_week_phase(dt) == "weekend"
+    plb, prb, pstyle = flourish_bar_brackets(ts, phase)
+    prefix: list[tuple[str, str]] = [
+        (plb, pstyle),
+        (phase, "CYAN"),
+        (prb, pstyle),
+        (" ", "SYS"),
+    ]
+    prefix_len = sum(len(text) for text, _style in prefix)
+    tail_opts = (f" {pct}% {dur}", f" {pct}%", f" {dur}", "")
+    for tail in tail_opts:
+        bar_lb, bar_rb, bar_bstyle = flourish_bar_brackets(ts, "tomon-bar")
+        overhead = prefix_len + len(bar_lb) + len(bar_rb) + len(tail)
+        bar_w = max(8, width - overhead)
+        if bar_w >= 8 or not tail:
+            segments: list[tuple[str, str]] = [
+                *prefix,
+                (bar_lb, bar_bstyle),
+                *progress_bar_segments(pct_val, bar_w, bar_style),
+                (bar_rb, bar_bstyle),
+            ]
+            if tail:
+                tail_style = "MAG" if in_weekend else "GREEN"
+                segments.extend(countdown_tail_segments(pct, dur, ts, tail_style))
+            return pad_colored_segments(segments, width)
+    return [(pad("[????]", width), "SYS")]
+
+
+def zeal_clock_segments(now: float, max_width: int) -> list[tuple[str, str]]:
+    dt = datetime.fromtimestamp(now)
+    iso_week = max(1, min(52, int(dt.isocalendar().week)))
+    epoch_txt = f"[{int(now)}]"
+    prefixes = (
+        f"ZEAL {dt:%H:%M:%S} W{iso_week:02d} ",
+        f"ZEAL {dt:%H:%M} W{iso_week:02d} ",
+        f"ZEAL {dt:%H:%M:%S} ",
+        f"ZEAL {dt:%H:%M} ",
+        f"{dt:%H:%M:%S} ",
+        "",
+    )
+    for prefix in prefixes:
+        if len(prefix) + len(epoch_txt) <= max_width:
+            segs: list[tuple[str, str]] = []
+            if prefix:
+                segs.append((prefix, "CYAN"))
+            segs.append((epoch_txt, "YELLOW"))
+            return segs
+    if len(epoch_txt) <= max_width:
+        return [(epoch_txt, "YELLOW")]
+    return [(epoch_txt[-max_width:], "YELLOW")]
+
+
+def zeal_clock_bit(now: float, max_len: int | None = None) -> str:
+    if max_len is None:
+        dt = datetime.fromtimestamp(now)
+        iso_week = max(1, min(52, int(dt.isocalendar().week)))
+        return f"ZEAL {dt:%H:%M:%S} W{iso_week:02d} [{int(now)}]"
+    return "".join(text for text, _style in zeal_clock_segments(now, max_len))
+
+
+def top_status_segments(now: float | None = None, width: int = WIDTH) -> list[tuple[str, str]]:
+    ts = time.time() if now is None else now
+    return pad_colored_segments(zeal_clock_segments(ts, width), width)
+
+
+def top_status_line(now: float | None = None, width: int = WIDTH) -> str:
+    ts = time.time() if now is None else now
+    return "".join(text for text, _style in top_status_segments(ts, width))
+
+
+def _defcon_level_style(defcon_text: str) -> str:
+    match = re.search(r"DEFCON\s+(\d+)", defcon_text, re.IGNORECASE)
+    if not match:
+        return "YELLOW"
+    level = int(match.group(1))
+    if level <= 2:
+        return "RED"
+    if level <= 4:
+        return "YELLOW"
+    return "GREEN"
+
+
+def _defcon_colored_parts(defcon_text: str) -> list[tuple[str, str]]:
+    level_style = _defcon_level_style(defcon_text)
+    parts: list[tuple[str, str]] = []
+    for token in re.sub(r"\s+", " ", defcon_text).strip().split():
+        upper = token.upper()
+        if upper.startswith("J") and any(ch.isdigit() for ch in token):
+            style = "CYAN"
+        elif upper == "DEFCON":
+            style = "MAG"
+        elif token.isdigit():
+            style = level_style
+        elif upper in ("STANDBY", "NORMAL", "READY", "HOLD"):
+            style = "GREEN"
+        elif upper in ("MAX", "ALERT", "CRITICAL", "COCKED"):
+            style = "RED"
+        else:
+            style = "YELLOW"
+        if parts:
+            parts.append((" ", "SYS"))
+        parts.append((token, style))
+    return parts or [(defcon_text, "YELLOW")]
+
+
+def wopr_header_segments(mode: str, now: float, width: int = WIDTH) -> list[tuple[str, str]]:
+    defcon = joshua_defcon_ticker().strip() or "J124 DEFCON 5 STANDBY"
+    rot = compact_mode_rotator(mode, now)
+    tick = int(now * 0.75)
+    glint = SCROLLER_FX_GLINT[tick % len(SCROLLER_FX_GLINT)]
+    lfx = SCROLLER_FX_EDGE[tick % len(SCROLLER_FX_EDGE)]
+    rfx = SCROLLER_FX_EDGE[(tick + 2) % len(SCROLLER_FX_EDGE)]
+    ansi_mid = ("=", "-", "#", "*", "+")[tick % 5]
+
+    segments: list[tuple[str, str]] = [
+        (glint, "YELLOW"),
+        (lfx, "MOTD_FX"),
+        (ansi_mid, "CYAN"),
+        (" ", "SYS"),
+        *_defcon_colored_parts(defcon),
+        (" ", "SYS"),
+        (rot, "NOC"),
+        (" ", "SYS"),
+        (ansi_mid, "MAG"),
+        (rfx, "MOTD_FX"),
+        (glint, "YELLOW"),
+    ]
+
+    total = sum(len(text) for text, _style in segments)
+    if total > width:
+        segments = [
+            (lfx, "MOTD_FX"),
+            (" ", "SYS"),
+            *_defcon_colored_parts(defcon),
+            (" ", "SYS"),
+            (rfx, "MOTD_FX"),
+        ]
+    total = sum(len(text) for text, _style in segments)
+    if total > width:
+        segments = _defcon_colored_parts(defcon)
+    return center_colored_segments(segments, width)
+
+
+def wopr_header_line(mode: str, now: float, width: int = WIDTH) -> str:
+    return "".join(text for text, _style in wopr_header_segments(mode, now, width))
+
+
+_TICKER_SCROLL_CACHE: dict[str, Any] = {}
+
+
+def ticker_scroll_frames(snapshot: dict[str, Any], now: float | None = None) -> list[str]:
+    status = as_dict(snapshot.get("status"))
+    bridge = as_dict(snapshot.get("bridge"))
+    ts = time.time() if now is None else now
+    frames: list[str] = []
+    if not status.get("vector_ok"):
+        frames.append("ALERT VEC DN")
+    if not status.get("pbx_api_ok"):
+        frames.append("ALERT PBX DN")
+    vm = as_dict(as_dict(status.get("pbx_phones")).get("voicemail"))
+    vm_new = int(vm.get("new") or 0)
+    if vm_new > 0:
+        frames.append(f"VOICEMAIL {vm_new} NEW")
+    zone = normalize_line(bridge.get("hot_zone"))
+    if zone:
+        frames.append(f"ZONE {zone[:18]}")
+    npc = int(bridge.get("npc_count") or 0)
+    if npc:
+        frames.append(f"NPC ACTIVE {npc}")
+    frames.extend(agent_ticker_bits(status, now=ts))
+    gpu = gpu_summary(snapshot)
+    if gpu and gpu != "GPU telemetry warming up":
+        frames.append(gpu)
+    if not frames:
+        frames.append(f"MESH OK tkr {LCD_TICKER_VERSION}")
+    return frames
+
+
+def ticker_scroll_body(snapshot: dict[str, Any], now: float | None = None) -> str:
+    ts = time.time() if now is None else now
+    status = as_dict(snapshot.get("status"))
+    frames = ticker_scroll_frames(snapshot, ts)
+    frame_idx = int(ts // TICKER_FRAME_PERIOD_SEC) % len(frames)
+    key = (
+        frame_idx,
+        bool(status.get("vector_ok")),
+        bool(status.get("pbx_api_ok")),
+        LCD_TICKER_VERSION,
+        int(ts // TICKER_FRAME_PERIOD_SEC),
+        len(frames),
+    )
+    if _TICKER_SCROLL_CACHE.get("key") == key and _TICKER_SCROLL_CACHE.get("body"):
+        return str(_TICKER_SCROLL_CACHE["body"])
+    body = frames[frame_idx]
+    _TICKER_SCROLL_CACHE["key"] = key
+    _TICKER_SCROLL_CACHE["body"] = body
+    return body
 
 
 def compact_mode_rotator(mode: str, now: float, width: int = 8) -> str:
@@ -1086,19 +1514,9 @@ def compact_status_line(
     tick: int,
     width: int = WIDTH,
 ) -> str:
-    """Epoch clock + WOPR DEFCON + compact mode rotator when space allows."""
-    rot = compact_mode_rotator(mode, now)
-    clock = dashboard_header(snapshot, mode, now, tick, width).strip()
-    defcon = joshua_defcon_ticker().strip()
-    for combo in (
-        f"{clock}  {defcon}{rot}",
-        f"{clock}  {defcon.replace('STANDBY', 'SBY').replace('DEFCON', 'D')}{rot}",
-        f"{clock}{rot}",
-        clock,
-    ):
-        if len(combo) <= width:
-            return center(combo, width)
-    return dashboard_header(snapshot, mode, now, tick, width)
+    """WOPR DEFCON + mode rotator (ZEAL clock lives on top row)."""
+    _ = snapshot, tick
+    return wopr_header_line(mode, now, width)
 
 
 def lcd_frame_zones(frame_h: int) -> dict[str, int]:
@@ -2132,6 +2550,7 @@ def event_prefix_segments(
     now: float,
     width: int = WIDTH,
 ) -> list[tuple[str, str]]:
+    _ = width
     parts: list[tuple[str, str]] = []
     age = event_age_seconds(event, now)
     if age is not None:
@@ -2139,9 +2558,6 @@ def event_prefix_segments(
     canon = event_canon_suffix(event)
     if canon:
         parts.append((canon, "SYS"))
-    bracket = event_channel_bracket(event.channel)
-    if bracket:
-        parts.append((" " + bracket if parts else bracket, "IRC_CHAN"))
     return parts
 
 
@@ -2217,9 +2633,9 @@ def event_display_rows(
     if event.kind == "action":
         msg_style = "IRC_ACT" if not nick else nick_style
         if nick:
-            nick_segments = [(" *" + nick + " ", nick_style)]
+            nick_segments = [(" *", nick_style), (nick, nick_style), (" ", nick_style)]
     elif event.kind not in ("presence", "status") and nick:
-        nick_segments = [(" " + nick + ": ", nick_style)]
+        nick_segments = [(" ", nick_style), (nick, nick_style), (": ", nick_style)]
 
     prefix_len = sum(len(text) for text, _style in meta + nick_segments)
     first_room = max(1, width - prefix_len)
@@ -2422,7 +2838,6 @@ def ticker_text(snapshot: dict[str, Any], now: float | None = None) -> str:
         f"npc {bridge.get('npc_count', 0)}",
     ]
     bits.extend(agent_ticker_bits(status, now=ts))
-    bits.append(short_text(joshua_defcon_ticker(), 42))
     return " · ".join(bit for bit in bits if bit)
 
 

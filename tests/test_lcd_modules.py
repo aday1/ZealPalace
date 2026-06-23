@@ -118,7 +118,7 @@ class LcdRenderTests(unittest.TestCase):
         self.assertIn("alpha", joined)
         styles = {style for row in rows for _text, style in row}
         self.assertIn("IRC_TIME", styles)
-        self.assertIn("IRC_CHAN", styles)
+        self.assertIn("ZP", styles)
 
     def test_event_lines_long_prose_wraps_multiple_rows(self):
         body = "The Boox NoteAir tower stands vigilant over the archive spire"
@@ -129,7 +129,6 @@ class LcdRenderTests(unittest.TestCase):
         self.assertIn("Boox", joined)
         self.assertIn("archive", joined)
         self.assertNotIn("~", joined)
-        self.assertTrue(any("[#RPG]" in "".join(part for part, _style in row) for row in rows))
 
     def test_frame_is_fixed_size(self):
         snapshot = {
@@ -191,12 +190,11 @@ class LcdRenderTests(unittest.TestCase):
         styles = {style for _text, style in segments}
         text = "".join(part for part, _style in segments)
         self.assertIn("IRC_TIME", styles)
-        self.assertIn("IRC_CHAN", styles)
-        self.assertIn("MAG", styles)
-        self.assertIn("[#ZealPalace]", text)
+        self.assertIn("ZP", styles)
         self.assertIn("[1m]", text)
         self.assertNotRegex(text, r"\[\d{2}:\d{2}\]")
         self.assertIn("Zealot:", text)
+        self.assertNotIn("[#", text)
         self.assertLessEqual(sum(len(part) for part, _style in segments), WIDTH)
 
     def test_event_nick_per_character_color(self):
@@ -267,13 +265,12 @@ class LcdRenderTests(unittest.TestCase):
         self.assertTrue(any("QOTD" in row for row, _style in rows))
         self.assertTrue(all(len(row) <= WIDTH for row, _style in rows))
 
-    def test_calendar_line_shows_date_and_iso_week(self):
+    def test_calendar_line_shows_date(self):
         now = datetime(2026, 6, 16, 12, 0).timestamp()
         row = calendar_line(now, WIDTH)
         self.assertEqual(len(row), WIDTH)
         self.assertIn("Jun", row)
-        self.assertIn("W25/52", row)
-        self.assertNotIn("WB", row)
+        self.assertNotIn("W25/52", row)
         self.assertEqual(fmt_duration_short(5 * 86400 + 3 * 3600), "5d03h")
 
 
@@ -283,17 +280,14 @@ class WeeklyCountdownTests(unittest.TestCase):
         self.assertEqual(work_week_phase(datetime.fromtimestamp(now)), "work")
         row = work_week_countdown_line(now, WIDTH)
         self.assertEqual(len(row), WIDTH)
-        self.assertIn("WK", row)
-        self.assertIn("FRI", row)
-        self.assertIn("[", row)
-        self.assertNotIn("DONE", row)
+        self.assertIn("*#", row)
+        self.assertIn("%", row)
 
     def test_weekend_line_midweek_mon_countdown(self):
         now = datetime(2026, 6, 17, 12, 0).timestamp()
         row = weekend_monday_countdown_line(now, WIDTH)
         self.assertEqual(len(row), WIDTH)
-        self.assertIn("MON", row)
-        self.assertNotIn("#", row.split("MON", 1)[-1][:12])
+        self.assertIn("WORK", row)
 
     def test_weekend_phase_saturday(self):
         now = datetime(2026, 6, 20, 12, 0).timestamp()
@@ -302,14 +296,14 @@ class WeeklyCountdownTests(unittest.TestCase):
         mon = weekend_monday_countdown_line(now, WIDTH)
         self.assertEqual(len(wk), WIDTH)
         self.assertEqual(len(mon), WIDTH)
-        self.assertIn("DONE", wk)
-        self.assertIn("[#", mon)
+        self.assertIn("TO-MON", mon)
+        self.assertIn("*#", mon)
 
     def test_monday_pre_open_edge(self):
         now = datetime(2026, 6, 15, 9, 0).timestamp()
         self.assertEqual(work_week_phase(datetime.fromtimestamp(now)), "weekend")
         wk = work_week_countdown_line(now, WIDTH)
-        self.assertIn("DONE", wk)
+        self.assertIn("*#", wk)
 
 
 class ModeBarTests(unittest.TestCase):

@@ -21,11 +21,14 @@ from zealot_lcd_render import (
     LCD_EVENT_MAX_BODY_LINES,
     SCROLLER_SPEED,
     TICKER_SCROLLER_SPEED,
-    compact_status_line,
     lcd_frame_cols,
     lcd_frame_zones,
     anim_now,
-    calendar_line,
+    calendar_segments,
+    top_status_segments,
+    wopr_header_segments,
+    ticker_scroll_body,
+    weekend_monday_countdown_segments,
     chunky_scroller,
     comet_line,
     dashboard_footer_segments,
@@ -33,16 +36,12 @@ from zealot_lcd_render import (
     event_display_rows,
     event_lines,
     fit,
-    gpu_summary,
     lcd_status_line,
     agents_art_live,
     mode_art_compact,
     mode_name,
     pad,
     panel_lines,
-    ticker_text,
-    weekend_monday_countdown_line,
-    work_week_countdown_line,
 )
 
 try:
@@ -249,7 +248,7 @@ def attr_for(style: str, bold: bool = False, now: float | None = None, row: int 
         attr |= curses.A_BOLD
     if style in ("MOTD", "GREETZ", "MOTIVE", "IRC_MSG"):
         attr |= curses.A_BOLD
-    if style in ("IRC_CHAN", "IRC_NICK", "ZP", "ZH", "RPG", "ST", "PBX", "NOC", "CYAN", "MAG", "RGB", "GREEN", "YELLOW", "RED"):
+    if style in ("IRC_CHAN", "IRC_NICK", "ZP", "ZH", "RPG", "ST", "PBX", "NOC", "CYAN", "MAG", "RGB", "GREEN", "YELLOW", "RED", "TICK", "ART", "LOG", "GMQ"):
         attr |= curses.A_BOLD
     if style == "MOTD_FX":
         attr |= curses.A_DIM
@@ -433,30 +432,19 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     panel_mode = "agents" if sip_active else mode
     zones = lcd_frame_zones(frame_h)
 
-    # --- Header (3 rows): weekly countdown, epoch+WOPR, mesh ticker ---
-    add_line(
-        stdscr,
-        zones["header_start"],
-        work_week_countdown_line(now, frame_w),
-        "CYAN",
-        bold=True,
-        raw=True,
-        now=now,
-    )
-    add_line(
+    # --- Header (3 rows): ZEAL clock, WOPR/DEFCON, rotating mesh ticker ---
+    add_segment_line(stdscr, zones["header_start"], top_status_segments(now, frame_w), now=now)
+    add_segment_line(
         stdscr,
         zones["header_start"] + 1,
-        compact_status_line(snapshot, panel_mode, now, tick, frame_w),
-        "SYS",
-        bold=True,
-        raw=True,
+        wopr_header_segments(panel_mode, now, frame_w),
         now=now,
     )
     add_line(
         stdscr,
         zones["header_start"] + 2,
         chunky_scroller(
-            ticker_text(snapshot) + " · " + gpu_summary(snapshot),
+            ticker_scroll_body(snapshot, now),
             anim_now(now),
             frame_w,
             speed=TICKER_SCROLLER_SPEED,
@@ -467,16 +455,8 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         now=now,
     )
 
-    # --- Weekend / Monday 10AM weekly phase row ---
-    add_line(
-        stdscr,
-        zones["mode_bar"],
-        weekend_monday_countdown_line(now, frame_w),
-        "SYS",
-        bold=True,
-        raw=True,
-        now=now,
-    )
+    # --- WORK / TO-MON phase row with ANSI progress bar ---
+    add_segment_line(stdscr, zones["mode_bar"], weekend_monday_countdown_segments(now, frame_w), now=now)
 
     # --- Compact centered ASCII art (2 rows) ---
     if panel_mode == "agents":
@@ -508,7 +488,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         panel_row += 1
 
     # --- Mid footer: calendar week countdown + host/motd scroller ---
-    add_line(stdscr, zones["calendar_row"], calendar_line(now, frame_w), "SYS", raw=True, now=now)
+    add_segment_line(stdscr, zones["calendar_row"], calendar_segments(now, frame_w), now=now)
     add_segment_line(stdscr, zones["status_row"], dashboard_footer_segments(snapshot, now, tick, frame_w), now=now)
 
     # --- Events zone (reserved rows, tail-pinned, colored segments) ---
