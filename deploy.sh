@@ -52,12 +52,12 @@ echo "  Done."
 
 # ─── Deploy scripts to ~/.local/bin ─────────────
 echo "[5/10] Deploying scripts..."
-for script in zealot_bot.py zealot_display.py boot_plasma.py boot_meteor.py boot_genesis.py boot_anim_common.py zealot_blog.py \
+for script in zealot_bot.py zealot_display.py boot_plasma.py boot_meteor.py boot_genesis.py boot_battle.py boot_realm.py boot_boss.py boot_portal.py boot_anim_common.py zealot_lcd_lore.py zealot_blog.py \
              zealot_rpg.py zealot_hangs.py zealot_web_api.py zealot_admin.py \
              zealot_terrarium.py zealot_world_pulse.py zealot_sip_flash.py zealot_pbx_phones.py zealot_irc_tail.py zealot_noc_mesh.py \
              zealot_lcd_feeds.py zealot_lcd_render.py zealot_navi_ticker.py zealot_wopr_lcd.py \
              joshua_wopr_menu.py zealot_pbx_pull.py lcd_tmux_bar.py zealot_display_loop.sh \
-             lcd-init lcd-boot meteor_wipe.sh; do
+             lcd-init lcd-boot lcd-reattach meteor_wipe.sh; do
     if [ -f "$DEPLOY_DIR/$script" ]; then
         cp "$DEPLOY_DIR/$script" "$BIN_DIR/$script"
         chmod +x "$BIN_DIR/$script"

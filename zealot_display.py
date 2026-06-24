@@ -80,6 +80,11 @@ except Exception:  # pragma: no cover - optional on development hosts
     draw_wopr_overlay = None
 
 try:
+    from zealot_lcd_lore import LoreAnimScheduler
+except Exception:  # pragma: no cover - optional on dev hosts
+    LoreAnimScheduler = None
+
+try:
     from lcd_tmux_bar import set_tmux_bar
 except Exception:  # pragma: no cover - optional on development hosts
     def set_tmux_bar(
@@ -602,6 +607,7 @@ def main(stdscr) -> None:
     last_snapshot = 0.0
     input_buf = ""
     session_tick = 0
+    lore_sched = LoreAnimScheduler() if LoreAnimScheduler else None
 
     while True:
         now = time.time()
@@ -628,6 +634,17 @@ def main(stdscr) -> None:
             if now - last_snapshot > 1.0:
                 snapshot = collect_snapshot(irc_tap)
                 last_snapshot = now
+
+            if lore_sched is not None:
+                try:
+                    if lore_sched.maybe_play(snapshot, now):
+                        try:
+                            stdscr.clear()
+                        except curses.error:
+                            pass
+                        continue
+                except Exception:
+                    pass
 
             draw(stdscr, snapshot, input_buf, now, session_tick, sip_flash)
 

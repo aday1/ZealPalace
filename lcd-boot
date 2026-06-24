@@ -5,8 +5,13 @@ export TERM=linux
 
 METEOR_WIPE_FLAG="/tmp/.zealot_meteor_wipe_in_progress"
 if [ -f "$METEOR_WIPE_FLAG" ]; then
-    # Meteor wipe owns the TFT — do not start ticker until reboot
-    exec sleep infinity
+    # Wait for wipe/preview to finish (max ~10 min), then return to ticker
+    _wait=0
+    while [ -f "$METEOR_WIPE_FLAG" ] && [ "$_wait" -lt 300 ]; do
+        sleep 2
+        _wait=$((_wait + 1))
+    done
+    rm -f "$METEOR_WIPE_FLAG"
 fi
 
 # Set console font for max TFT density (8x14 Terminus = 40x34 on 320x480)

@@ -5,7 +5,12 @@ export TERM=linux
 
 METEOR_WIPE_FLAG="/tmp/.zealot_meteor_wipe_in_progress"
 if [ -f "$METEOR_WIPE_FLAG" ]; then
-    exec sleep infinity
+    _wait=0
+    while [ -f "$METEOR_WIPE_FLAG" ] && [ "$_wait" -lt 300 ]; do
+        sleep 2
+        _wait=$((_wait + 1))
+    done
+    rm -f "$METEOR_WIPE_FLAG"
 fi
 
 # zeal_voltage_quiet

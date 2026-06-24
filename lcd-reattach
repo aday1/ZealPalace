@@ -1,0 +1,16 @@
+#!/bin/bash
+# Reattach physical TFT (tty1) to the LCD tmux ticker after meteor/preview
+set -euo pipefail
+METEOR_WIPE_FLAG="/tmp/.zealot_meteor_wipe_in_progress"
+pkill -f 'sleep infinity' 2>/dev/null || true
+rm -f "$METEOR_WIPE_FLAG"
+if ! tmux has-session -t lcd 2>/dev/null; then
+  "$HOME/.local/bin/lcd-init"
+  sleep 1
+fi
+sudo chvt 1 2>/dev/null || true
+if [ -n "${SSH_CONNECTION:-}" ]; then
+  echo "LCD tmux running. On the Pi console run: exec tmux attach -t lcd"
+else
+  exec tmux attach-session -t lcd
+fi

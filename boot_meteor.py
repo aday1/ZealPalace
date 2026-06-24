@@ -14,7 +14,6 @@ from boot_anim_common import (
     WHT,
     YEL,
     blit,
-    blit,
     blit_colored,
     center,
     draw_frame,
