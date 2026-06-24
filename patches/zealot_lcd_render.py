@@ -15,7 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
-from zealot_lcd_feeds import LcdEvent, SPAWN_BODY_RE, clip_sentence, parse_iso_ts, short_text
+from zealot_lcd_feeds import LcdEvent, SPAWN_BODY_RE, clip_sentence, normalize_lcd_body, parse_iso_ts, short_text
 
 try:
     from zealot_sip_flash import (
@@ -59,8 +59,8 @@ LCD_EVENTS_HEADER_ROWS = 1
 LCD_EVENTS_MIN_ROWS = 14
 LCD_EVENTS_ON_SCREEN = 24
 LCD_EVENT_MAX_BODY_LINES = 14
-LCD_EVENT_OLD_CHATTER_LINES = 6
-LCD_EVENT_OLD_MAX_LINES = 6
+LCD_EVENT_OLD_CHATTER_LINES = 5
+LCD_EVENT_OLD_MAX_LINES = 5
 LCD_EVENT_OLD_NARRATIVE_LINES = 3
 NARRATIVE_EVENT_KINDS = frozenset(
     {
@@ -115,7 +115,7 @@ IRC_NICK_STYLES: dict[str, str] = {
     "rei": "CYAN",
     "nyx": "RGB",
     "mira": "GREEN",
-    "misato": "YELLOW",
+    "misato": "MAG",
     "celes": "ST",
     "holybell": "ZH",
     "vexara": "PBX",
@@ -128,7 +128,7 @@ IRC_NICK_STYLES: dict[str, str] = {
     "pixel": "RPG",
     "lyric": "ART",
     "riff": "GREEN",
-    "vendor": "YELLOW",
+    "vendor": "ART",
     "cleric": "ST",
     "sybil": "MAG",
     "vex": "RGB",
@@ -139,7 +139,7 @@ IRC_NICK_STYLES: dict[str, str] = {
     "kernelix": "CYAN",
     "spectralbyte": "MAG",
     "dark": "RED",
-    "sage": "YELLOW",
+    "sage": "GREEN",
     "glitch": "GMQ",
     "dm": "PBX",
     "rift": "CYAN",
@@ -181,7 +181,7 @@ SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
 FOOTER_SCROLLER_SPEED = 0.35
 FOOTER_FRAME_PERIOD_SEC = 15.0
-LCD_TICKER_VERSION = "tkr0624r"
+LCD_TICKER_VERSION = "tkr0624v"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -325,7 +325,7 @@ COMPANION_LINE_COLORS: tuple[str, ...] = (
     "CYAN",
     "RGB",
     "GREEN",
-    "YELLOW",
+    "ART",
     "ST",
     "ZH",
     "PBX",
@@ -335,7 +335,7 @@ COMPANION_LINE_COLORS: tuple[str, ...] = (
     "RPG",
     "GMQ",
     "TICK",
-    "ART",
+    "LOG",
 )
 
 
@@ -2852,6 +2852,26 @@ def event_prefix_segments(
     return parts
 
 
+_HOSTISH_TOKEN_RE = re.compile(r"[\w.-]{12,}")
+
+
+def _soften_wrap_tokens(text: str, width: int = WIDTH) -> str:
+    """Insert wrap-friendly breaks in long dotted tokens (hostnames, URLs)."""
+
+    def soften(match: re.Match[str]) -> str:
+        tok = match.group(0)
+        if len(tok) <= width // 2 or ("." not in tok and "/" not in tok):
+            return tok
+        return tok.replace("/", " / ").replace(".", " . ")
+
+    return _HOSTISH_TOKEN_RE.sub(soften, text)
+
+
+def _harden_wrap_tokens(text: str) -> str:
+    """Restore dotted tokens after wrapping."""
+    return re.sub(r"\s\.\s", ".", re.sub(r"\s/\s", "/", text))
+
+
 def _wrap_event_body(
     body: str,
     first_width: int,
@@ -2861,24 +2881,25 @@ def _wrap_event_body(
     clean = re.sub(r"\s+", " ", str(body or "")).strip()
     if not clean:
         return [""]
+    soft = re.sub(r"\s+", " ", _soften_wrap_tokens(clean)).strip()
     lines: list[str] = []
     pos = 0
     for idx in range(max(1, max_lines)):
         room = first_width if idx == 0 else cont_width
-        if pos >= len(clean):
+        if pos >= len(soft):
             break
         wrapped = textwrap.wrap(
-            clean[pos:],
+            soft[pos:],
             width=room,
-            break_long_words=True,
+            break_long_words=False,
             break_on_hyphens=False,
         )
         if not wrapped:
             break
-        chunk = wrapped[0]
+        chunk = _harden_wrap_tokens(wrapped[0])
         lines.append(chunk)
-        pos += len(chunk)
-        while pos < len(clean) and clean[pos] == " ":
+        pos += len(wrapped[0])
+        while pos < len(soft) and soft[pos] == " ":
             pos += 1
     return lines or [""]
 
@@ -2919,21 +2940,34 @@ def _fit_event_body_lines(
     max_lines: int,
 ) -> list[str]:
     """Wrap body to max_lines; never leave a dangling 'battle against the' tail line."""
-    clean = re.sub(r"\s+", " ", str(body or "")).strip()
+    clean = normalize_lcd_body(body)
     if not clean:
         return [""]
     full = _wrap_event_body(clean, first_width, cont_width, 999)
     if len(full) <= max(1, max_lines):
         return full[: max(1, max_lines)]
 
-    # Roomy budgets: wrap across rows instead of early clip_sentence chop.
-    if max_lines >= 6:
-        lines = full[:max_lines]
+    if max_lines >= 2:
+        lines: list[str] = []
+        for chunk in full[:max_lines]:
+            lines.append(chunk)
+            if _line_ends_complete_thought(lines[-1]):
+                continue
+            if len(lines) >= max_lines:
+                break
         while len(lines) > 1 and not _line_ends_complete_thought(lines[-1]):
-            lines.pop()
+            if len(lines) < max_lines and len(lines) < len(full):
+                lines.append(full[len(lines)])
+            elif len(lines) > 1:
+                lines.pop()
+            else:
+                break
         if len(full) > len(lines) and lines:
             room = cont_width if len(lines) > 1 else first_width
-            lines[-1] = _mark_truncated_line(lines[-1], room, continued=True)
+            if len(lines) < max_lines and len(full) > len(lines):
+                lines.append(full[len(lines)])
+            if len(full) > len(lines) and lines:
+                lines[-1] = _mark_truncated_line(lines[-1], room, continued=True)
         return lines
 
     budget = max(first_width, first_width + cont_width * max(0, max_lines - 1))
@@ -3054,8 +3088,19 @@ def compact_event_draw_rows(
     return trimmed + newest_rows
 
 
+def _lcd_field_str(value: Any) -> str:
+    if isinstance(value, (tuple, list)):
+        value = value[0] if value else ""
+    return str(value or "").strip()
+
+
 def _event_nick_label(event: LcdEvent) -> str:
-    return (event.nick or event.channel.strip("#") or event.kind or "").strip()
+    nick = _lcd_field_str(event.nick)
+    if nick:
+        return nick
+    channel = _lcd_field_str(event.channel).strip("#")
+    kind = _lcd_field_str(event.kind)
+    return (channel or kind or "").strip()
 
 
 def _event_is_realm(event: LcdEvent) -> bool:
@@ -3075,14 +3120,14 @@ EVENT_KIND_STYLES: dict[str, str] = {
     "realm_event": "GREEN",
     "meteor": "RED",
     "plague": "MAG",
-    "blessing": "YELLOW",
+    "blessing": "GREEN",
     "eclipse": "RGB",
     "festival": "MOTD",
     "invasion": "RED",
-    "earthquake": "YELLOW",
+    "earthquake": "RED",
     "gold_rain": "MOTD",
     "death": "RED",
-    "birth": "YELLOW",
+    "birth": "GREEN",
     "marriage": "MAG",
     "notice": "LOG",
     "react": "ZH",
@@ -3099,7 +3144,7 @@ EVENT_KIND_STYLES: dict[str, str] = {
 
 def event_msg_style(event: LcdEvent) -> str:
     kind = str(event.kind or "message").lower()
-    body = re.sub(r"\s+", " ", str(event.text or "")).strip().lower()
+    body = normalize_lcd_body(re.sub(r"\s+", " ", str(event.text or "")).strip()).lower()
     if "atmosphere shifts" in body:
         return "ART"
     if kind in EVENT_KIND_STYLES:
@@ -3165,6 +3210,55 @@ def event_body_style(event: LcdEvent) -> str:
     return event_msg_style(event)
 
 
+EVENT_BODY_LINE_ALT: dict[str, tuple[str, str]] = {
+    "IRC_MSG": ("IRC_MSG", "GRAY"),
+    "CYAN": ("CYAN", "ART"),
+    "MAG": ("MAG", "RGB"),
+    "GREEN": ("GREEN", "ZH"),
+    "ZP": ("ZP", "CYAN"),
+    "ZH": ("ZH", "GREEN"),
+    "ST": ("ST", "MAG"),
+    "PBX": ("PBX", "CYAN"),
+    "RPG": ("RPG", "GREEN"),
+    "LOG": ("LOG", "GRAY"),
+    "GRAY": ("GRAY", "LOG"),
+    "ART": ("ART", "CYAN"),
+    "RGB": ("RGB", "MAG"),
+    "RED": ("RED", "PBX"),
+    "TICK": ("TICK", "CYAN"),
+    "GMQ": ("GMQ", "MAG"),
+    "NOC": ("NOC", "CYAN"),
+}
+
+
+def event_line_body_style(event: LcdEvent, line_idx: int) -> str:
+    base = event_body_style(event)
+    alts = EVENT_BODY_LINE_ALT.get(base, (base, "GRAY"))
+    return alts[line_idx % len(alts)]
+
+
+EVENT_ROW_BODY_STYLES = frozenset(EVENT_BODY_LINE_ALT.keys()) | frozenset(
+    alt for pair in EVENT_BODY_LINE_ALT.values() for alt in pair
+)
+
+
+def alternate_event_row_styles(
+    segments: list[tuple[str, str]],
+    row_index: int,
+) -> list[tuple[str, str]]:
+    """Stripe EVENT body text on odd rows so wrapped lines scan easier."""
+    if row_index % 2 == 0:
+        return segments
+    out: list[tuple[str, str]] = []
+    for text, style in segments:
+        if style in EVENT_ROW_BODY_STYLES and style in EVENT_BODY_LINE_ALT:
+            alt = EVENT_BODY_LINE_ALT[style][1]
+            out.append((text, alt))
+        else:
+            out.append((text, style))
+    return out
+
+
 def event_display_rows(
     event: LcdEvent,
     width: int = WIDTH,
@@ -3172,7 +3266,7 @@ def event_display_rows(
     max_body_lines: int = LCD_EVENT_MAX_BODY_LINES,
 ) -> list[list[tuple[str, str]]]:
     now_ts = time.time() if now is None else now
-    body = re.sub(r"\s+", " ", str(event.text or "")).strip()
+    body = normalize_lcd_body(re.sub(r"\s+", " ", str(event.text or "")).strip())
     nick = _event_nick_label(event)
     nick_style = event_nick_style(event)
 
@@ -3201,10 +3295,11 @@ def event_display_rows(
     last_idx = len(body_lines) - 1
     rows: list[list[tuple[str, str]]] = []
     for idx, chunk in enumerate(body_lines):
+        line_style = event_line_body_style(event, idx)
         if idx == 0:
-            segments = [*meta, *nick_segments, (chunk, msg_style)]
+            segments = [*meta, *nick_segments, (chunk, line_style)]
         else:
-            segments = [(chunk, msg_style)]
+            segments = [(chunk, line_style)]
         rows.append(pad_colored_segments(segments, width))
     if not rows:
         rows.append(pad_colored_segments([*meta, *nick_segments], width))
@@ -3212,7 +3307,7 @@ def event_display_rows(
 
 
 def _event_body_key(event: LcdEvent) -> str:
-    body = re.sub(r"\s+", " ", str(event.text or "")).strip()
+    body = normalize_lcd_body(re.sub(r"\s+", " ", str(event.text or "")).strip())
     return f"{event.source}|{event.channel}|{event.nick}|{event.kind}|{event.sort_ts}|{body[:96]}"
 
 
@@ -3221,8 +3316,25 @@ def _event_base_kind(event_base: str) -> str:
     return parts[3].lower() if len(parts) > 3 else "message"
 
 
+def newest_chatter_event(events: list[LcdEvent]) -> LcdEvent | None:
+    for event in reversed(events):
+        kind = str(event.kind or "message").lower()
+        if kind in ("message", "action") and re.sub(r"\s+", " ", str(event.text or "")).strip():
+            return event
+    return None
+
+
+def newest_chatter_base(events: list[LcdEvent]) -> str:
+    event = newest_chatter_event(events)
+    if event is None:
+        return _event_body_key(events[-1]) if events else ""
+    return _event_body_key(event)
+
+
 def event_old_max_lines(event: LcdEvent) -> int:
     kind = str(event.kind or "message").lower()
+    if kind == "lore":
+        return 2
     if kind in ("spawn", "birth", "rebirth", "rpg"):
         return LCD_EVENT_OLD_NARRATIVE_LINES
     if kind in ("message", "action"):
@@ -3239,7 +3351,7 @@ def _older_event_slice(chunk: list[EventDrawRow], event_base: str, limit: int) -
     if kind in NARRATIVE_EVENT_KINDS or kind in ("spawn", "birth", "rebirth", "rpg"):
         return chunk[-take:]
     if kind in ("message", "action"):
-        return chunk[:take]
+        return chunk[-take:]
     return chunk[-take:]
 
 
@@ -3262,26 +3374,45 @@ def build_event_zone_rows(
     ts = time.time() if now is None else now
     if slots <= 0 or not events:
         return []
-    cap = max(8, min(len(events), LCD_EVENTS_ON_SCREEN))
+    cap = min(len(events), LCD_EVENTS_ON_SCREEN)
     batch = list(events)[-cap:]
-    newest_base = _event_body_key(batch[-1])
-    newest_full = event_wrap_line_count(batch[-1], width, ts)
-    reserve = max(0, len(batch) - 1)
-    newest_budget = min(newest_full, max(1, slots - reserve))
+    max_batch = max(3, min(len(batch), max(3, (slots * 2) // 5)))
+    batch = batch[-max_batch:]
+    focus = newest_chatter_event(batch) or batch[-1]
+    focus_base = _event_body_key(focus)
 
-    def _assemble(newest_lines: int) -> list[EventDrawRow]:
+    def _assemble(batch_events: list[LcdEvent], newest_lines: int) -> list[EventDrawRow]:
         rows: list[EventDrawRow] = []
-        for event in batch:
-            is_newest = _event_body_key(event) == newest_base
-            max_lines = newest_lines if is_newest else event_old_max_lines(event)
+        for event in batch_events:
+            is_focus = _event_body_key(event) == focus_base
+            max_lines = newest_lines if is_focus else event_old_max_lines(event)
             rows.extend(event_display_entries(event, width, now=ts, max_body_lines=max_lines))
-        return compact_event_draw_rows(rows, slots, newest_base)
+        return compact_event_draw_rows(rows, slots, focus_base)
 
-    out = _assemble(newest_budget)
-    spare = slots - len(out)
-    if spare > 0 and newest_budget < newest_full:
-        out = _assemble(min(newest_full, newest_budget + spare))
-    return out
+    while len(batch) >= 2:
+        newest_full = event_wrap_line_count(focus, width, ts)
+        old_min = max(0, len(batch) - 1)
+        newest_budget = min(newest_full, max(3, slots - old_min))
+        out = _assemble(batch, newest_budget)
+        spare = slots - len(out)
+        if spare > 0 and newest_budget < newest_full:
+            out = _assemble(batch, min(newest_full, newest_budget + spare))
+        if len(out) <= slots:
+            while len(out) < slots and newest_budget < newest_full:
+                grown = _assemble(batch, min(newest_full, newest_budget + 1))
+                if len(grown) > slots:
+                    break
+                if len(grown) <= len(out):
+                    break
+                out = grown
+                newest_budget += 1
+            return out
+        batch = batch[1:]
+        focus = newest_chatter_event(batch) or batch[-1]
+        focus_base = _event_body_key(focus)
+
+    newest_full = event_wrap_line_count(focus, width, ts)
+    return _assemble(batch, min(newest_full, slots))
 
 
 def event_display_entries(
@@ -3292,7 +3423,7 @@ def event_display_entries(
 ) -> list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]]:
     """Prefix/body split, line key, event base, sort_ts, and typeable flag."""
     now_ts = time.time() if now is None else now
-    body = re.sub(r"\s+", " ", str(event.text or "")).strip()
+    body = normalize_lcd_body(re.sub(r"\s+", " ", str(event.text or "")).strip())
     nick = _event_nick_label(event)
     nick_style = event_nick_style(event)
 
@@ -3316,7 +3447,8 @@ def event_display_entries(
     out: list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]] = []
     for idx, chunk in enumerate(body_lines):
         prefix = [*meta, *nick_segments] if idx == 0 else []
-        body_seg = [(chunk, msg_style)] if chunk else []
+        line_style = event_line_body_style(event, idx)
+        body_seg = [(chunk, line_style)] if chunk else []
         line_key = f"{event_base}|{idx}"
         out.append((prefix, body_seg, line_key, event_base, float(event.sort_ts or 0.0), typeable))
     if not out:

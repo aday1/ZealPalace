@@ -3,6 +3,12 @@
 # Runs plasma animation, then starts tmux LCD session
 export TERM=linux
 
+METEOR_WIPE_FLAG="/tmp/.zealot_meteor_wipe_in_progress"
+if [ -f "$METEOR_WIPE_FLAG" ]; then
+    # Meteor wipe owns the TFT — do not start ticker until reboot
+    exec sleep infinity
+fi
+
 # Set console font for max TFT density (8x14 Terminus = 40x34 on 320x480)
 # Uni3 = wider unicode; regular weight is easier to read on the TFT.
 if [ -z "$SSH_CONNECTION" ]; then
@@ -10,13 +16,19 @@ if [ -z "$SSH_CONNECTION" ]; then
       || setfont Uni2-Terminus14.psf.gz 2>/dev/null
 fi
 
-# Only run plasma once per boot (use a flag file)
 BOOT_FLAG="/tmp/.zealot_plasma_done_$(id -u)"
+POST_METEOR_FLAG="/tmp/.zealot_post_meteor_boot_$(id -u)"
 
-if [ ! -f "$BOOT_FLAG" ]; then
-    # Run boot plasma animation
-    python3 ~/.local/bin/boot_plasma.py 2>/dev/null
+# After meteor wipe: genesis already ran — skip plasma, go straight to ticker
+if [ -f "$POST_METEOR_FLAG" ]; then
+    rm -f "$POST_METEOR_FLAG"
     touch "$BOOT_FLAG"
+else
+    # Normal boot: demoscene plasma once per boot
+    if [ ! -f "$BOOT_FLAG" ]; then
+        python3 ~/.local/bin/boot_plasma.py 2>/dev/null
+        touch "$BOOT_FLAG"
+    fi
 fi
 
 # Initialize LCD session if not running

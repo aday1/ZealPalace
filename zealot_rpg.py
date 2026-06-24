@@ -7390,6 +7390,15 @@ def save_player(p):
     f = RPG_DIR / f'{p["nick"].lower()}.json'
     f.write_text(json.dumps(p, indent=2))
 
+def ensure_player(nick):
+    """Load a saved character or create one silently (no /new nag)."""
+    p = load_player(nick)
+    if p:
+        return p
+    p = default_player(nick)
+    save_player(p)
+    return p
+
 def load_world():
     try:
         return json.loads(WORLD_FILE.read_text())
@@ -7640,11 +7649,9 @@ class RPGEngine:
                             return
                         entry_msg = random.choice(ENTRY_MESSAGES).format(nick=nick)
                         rpg_log('***', entry_msg)
-                        p = load_player(nick)
-                        if p:
-                            self.irc.say(f'{entry_msg} Welcome back — {LOCATIONS[p["location"]]["name"]}, Lv{p["level"]}')
-                        else:
-                            self.irc.say(f'{entry_msg} Type /new to create your character.')
+                        p = ensure_player(nick)
+                        loc_name = LOCATIONS.get(p.get('location'), LOCATIONS['entrance'])['name']
+                        self.irc.say(f'{entry_msg} Welcome — {loc_name}, Lv{p["level"]}')
                 except:
                     pass
             return
@@ -7770,10 +7777,7 @@ class RPGEngine:
         rpg_log('DungeonMaster', f'WORLD RESET by {nick} (reset #{self.world["resets"]})')
 
     def _cmd_look(self, nick):
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: You don\'t exist yet. Type /new to create your character.')
-            return
+        p = ensure_player(nick)
         loc_id = p['location']
         loc = LOCATIONS.get(loc_id, LOCATIONS['entrance'])
 
@@ -7792,10 +7796,7 @@ class RPGEngine:
         rpg_log('DungeonMaster', f'{nick} looks around {loc["name"]}')
 
     def _cmd_go(self, nick, destination):
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         loc = LOCATIONS.get(p['location'], LOCATIONS['entrance'])
         # Fuzzy match destination
         dest = None
@@ -7827,10 +7828,7 @@ class RPGEngine:
             self.npcs.react_to_human(nick, f'arrives at {new_loc["name"]}', dest)
 
     def _cmd_fight(self, nick):
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         if not p.get('alive', True) or p['hp'] <= 0:
             self.irc.say(f'{nick}: You are dead! Type /new to respawn.')
             return
@@ -7838,10 +7836,7 @@ class RPGEngine:
 
     def _cmd_battle_heal(self, nick, cmd):
         """Heal in battle (target ally) or use potion outside battle"""
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         battle = ACTIVE_BATTLES.get(p['location'])
         if battle and battle.active and nick in battle.party:
             parts = cmd.split()
@@ -7862,10 +7857,7 @@ class RPGEngine:
         rpg_log('DungeonMaster', f'{nick} heals for {heal}')
 
     def _cmd_battle_defend(self, nick):
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         battle = ACTIVE_BATTLES.get(p['location'])
         if battle and battle.active and nick in battle.party:
             battle.set_action(nick, 'defend')
@@ -7874,10 +7866,7 @@ class RPGEngine:
             self.irc.say(f'{nick}: No active battle here. Use /fight to start one.')
 
     def _cmd_battle_combo(self, nick):
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         battle = ACTIVE_BATTLES.get(p['location'])
         if battle and battle.active and nick in battle.party:
             if len(battle.party) < 2:
@@ -7893,10 +7882,7 @@ class RPGEngine:
         if nick not in ADMIN_NICKS:
             self.irc.say(f'{nick}: Admin only.')
             return
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         self._start_battle(p['location'], nick, force_boss=True)
 
     def _start_battle(self, location_id, initiator_nick, force_boss=False):
@@ -8048,10 +8034,7 @@ class RPGEngine:
                 self.npcs._publish_state()
 
     def _cmd_heal(self, nick):
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         potions = [i for i, item in enumerate(p['inventory']) if 'healing' in item.lower()]
         if not potions:
             self.irc.say(f'{nick}: No healing potions! Fight monsters to find some.')
@@ -8064,10 +8047,7 @@ class RPGEngine:
         rpg_log('DungeonMaster', f'{nick} heals for {heal}')
 
     def _cmd_inventory(self, nick):
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         if not p['inventory']:
             self.irc.say(f'🎒 {nick}\'s pack is empty.')
         else:
@@ -8075,10 +8055,7 @@ class RPGEngine:
             self.irc.say(f'🎒 {nick}: {items}')
 
     def _cmd_stats(self, nick):
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         loc = LOCATIONS.get(p['location'], LOCATIONS['entrance'])
         align = ALIGNMENT_DISPLAY.get(p.get('alignment', 'true_neutral'), 'Neutral')
         role = p.get('role', 'warrior').title()
@@ -8152,10 +8129,7 @@ class RPGEngine:
 
     def _cmd_action(self, nick, action):
         """Free-form action - let Ollama DM interpret it"""
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new to begin your adventure first.')
-            return
+        p = ensure_player(nick)
 
         loc = LOCATIONS.get(p['location'], LOCATIONS['entrance'])
         prompt = (
@@ -8274,10 +8248,7 @@ class RPGEngine:
 
     def _cmd_alignment(self, nick):
         """Show alignment info"""
-        p = load_player(nick)
-        if not p:
-            self.irc.say(f'{nick}: Type /new first.')
-            return
+        p = ensure_player(nick)
         align = ALIGNMENT_DISPLAY.get(p.get('alignment', 'true_neutral'), 'True Neutral')
         self.irc.say(f'⚖ {nick}: {align}')
         if p.get('deity'):

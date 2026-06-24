@@ -3,6 +3,11 @@
 # Runs plasma animation, then starts tmux LCD session
 export TERM=linux
 
+METEOR_WIPE_FLAG="/tmp/.zealot_meteor_wipe_in_progress"
+if [ -f "$METEOR_WIPE_FLAG" ]; then
+    exec sleep infinity
+fi
+
 # zeal_voltage_quiet
 if [ -z "$SSH_CONNECTION" ]; then
   "$HOME/.local/bin/disable-pi-voltage-warnings.sh" >/dev/null 2>&1 || \
@@ -15,12 +20,17 @@ if [ -z "$SSH_CONNECTION" ]; then
     setfont Uni2-TerminusBold14.psf.gz 2>/dev/null
 fi
 
-# Only run plasma once per boot (use a flag file)
 BOOT_FLAG="/tmp/.zealot_plasma_done_$(id -u)"
+POST_METEOR_FLAG="/tmp/.zealot_post_meteor_boot_$(id -u)"
 
-if [ ! -f "$BOOT_FLAG" ]; then
-    python3 "$HOME/.local/bin/boot_plasma.py" 2>/dev/null
+if [ -f "$POST_METEOR_FLAG" ]; then
+    rm -f "$POST_METEOR_FLAG"
     touch "$BOOT_FLAG"
+else
+    if [ ! -f "$BOOT_FLAG" ]; then
+        python3 "$HOME/.local/bin/boot_plasma.py" 2>/dev/null
+        touch "$BOOT_FLAG"
+    fi
 fi
 
 # Initialize LCD session if not running

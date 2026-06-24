@@ -42,6 +42,8 @@ from zealot_lcd_render import (
     event_display_entries,
     compact_event_draw_rows,
     build_event_zone_rows,
+    alternate_event_row_styles,
+    newest_chatter_base,
     _event_body_key,
     LcdTypewriter,
     _segments_content_chars,
@@ -172,7 +174,7 @@ def init_colors() -> None:
         (PAIR_BORDER, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_TITLE, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_TREE, curses.COLOR_WHITE, curses.COLOR_BLACK),
-        (PAIR_TREE_SEL, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_TREE_SEL, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_PANEL, curses.COLOR_WHITE, curses.COLOR_BLACK),
         (PAIR_CYAN, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_MAG, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
@@ -184,7 +186,7 @@ def init_colors() -> None:
         (PAIR_LOG, curses.COLOR_WHITE, curses.COLOR_BLACK),
         (PAIR_TICK, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
         (PAIR_ART, curses.COLOR_CYAN, curses.COLOR_BLACK),
-        (PAIR_TAB_ON, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_TAB_ON, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_ZP, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_ZH, curses.COLOR_GREEN, curses.COLOR_BLACK),
         (PAIR_RPG, curses.COLOR_GREEN, curses.COLOR_BLACK),
@@ -194,7 +196,7 @@ def init_colors() -> None:
         (PAIR_NOC, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_RGB, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
         (PAIR_GMQ, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
-        (PAIR_MOTD, curses.COLOR_YELLOW, curses.COLOR_BLACK),
+        (PAIR_MOTD, curses.COLOR_MAGENTA, curses.COLOR_BLACK),
         (PAIR_MOTD_FX, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_IRC_CHAN, curses.COLOR_CYAN, curses.COLOR_BLACK),
         (PAIR_IRC_MSG, curses.COLOR_WHITE, curses.COLOR_BLACK),
@@ -248,7 +250,7 @@ def attr_for(style: str, bold: bool = False, now: float | None = None, row: int 
         "IRC_TIME": PAIR_DIM,
         "IRC_MSG": PAIR_IRC_MSG,
         "IRC_ACT": PAIR_MAG,
-        "IRC_NICK": PAIR_YELLOW,
+        "IRC_NICK": PAIR_CYAN,
         "GRAY": PAIR_DIM,
         "EVT": PAIR_GREEN,
         "CURSOR": PAIR_IRC_MSG,
@@ -525,18 +527,21 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         for event in (snapshot.get("events") or [])
         if not event_is_recurring_noise(event)
     ]
-    newest_base = ""
-    newest_ts = -1.0
-    for event in raw_events:
-        ts = float(event.sort_ts or 0.0)
-        if ts >= newest_ts:
-            newest_ts = ts
-            newest_base = _event_body_key(event)
+    newest_base = newest_chatter_base(raw_events)
     event_slots = max(1, zones["events_end"] - zones["events_start"])
     event_draw_rows = build_event_zone_rows(raw_events, event_slots, frame_w, now=now)
+    chatter_lines: dict[str, int] = {}
+    for _prefix, _body, _key, event_base, _sort_ts, typeable in event_draw_rows:
+        if typeable:
+            chatter_lines[event_base] = chatter_lines.get(event_base, 0) + 1
     prep: list[tuple[str, int]] = []
     for prefix, body, line_key, event_base, _sort_ts, typeable in event_draw_rows:
-        if typeable and event_base == newest_base:
+        if (
+            typeable
+            and event_base == newest_base
+            and line_key.endswith("|0")
+            and chatter_lines.get(event_base, 0) == 1
+        ):
             prep.append((line_key, len(_segments_content_chars(body, frame_w))))
     active_keys = {key for key, _length in prep}
     _EVENT_TYPEWRITER.prune(active_keys)
@@ -548,7 +553,13 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         row = start_row + idx
         if row < zones["events_start"] or row >= zones["events_end"]:
             continue
-        animate = typeable and event_base == newest_base
+        multi = chatter_lines.get(event_base, 0) > 1
+        animate = (
+            typeable
+            and event_base == newest_base
+            and line_key.endswith("|0")
+            and not multi
+        )
         typed = _EVENT_TYPEWRITER.reveal(
             prefix,
             body,
@@ -557,6 +568,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
             frame_w,
             animate=animate,
         )
+        typed = alternate_event_row_styles(typed, idx)
         add_segment_line(stdscr, row, typed, now=now)
 
     if input_buf:

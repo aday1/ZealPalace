@@ -112,9 +112,45 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def short_text(value: Any, limit: int = 120) -> str:
+_LCD_SYMBOL_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0000FE00-\U0000FE0F"
+    "\U0000200D"
+    "\U0001F1E0-\U0001F1FF"
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def lcd_clean_text(value: Any) -> str:
+    """Strip emoji and symbol clutter before the 40-col TFT renders it."""
     text = re.sub(r"[\r\n\t]+", " ", str(value or ""))
-    text = re.sub(r"\s+", " ", text).strip()
+    text = _LCD_SYMBOL_RE.sub("", text)
+    text = re.sub(r"[\u2600-\u26FF\u2700-\u27BF]", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_lcd_body(value: Any) -> str:
+    """Drop raw IRC wire format if a log line stored the full PRIVMSG."""
+    text = lcd_clean_text(value)
+    patterns = (
+        r"^:(?P<nick>[^!\s]+)!\S+\s+PRIVMSG\s+\S+\s+:(?P<body>.*)$",
+        r"^PRIVMSG\s+\S+\s+:(?P<body>.*)$",
+        r"^PRIVMSG\s+:(?P<body>.*)$",
+        r"^PRIVMSG\s+(?P<body>.+)$",
+        r"^NOTICE\s+\S+\s+:(?P<body>.*)$",
+    )
+    for pat in patterns:
+        m = re.match(pat, text, re.I)
+        if m:
+            return str(m.group("body") or "").strip()
+    return text
+
+
+def short_text(value: Any, limit: int = 120) -> str:
+    text = lcd_clean_text(value)
     if len(text) <= limit:
         return text
     return text[: max(1, limit - 3)].rstrip() + "..."
@@ -122,7 +158,7 @@ def short_text(value: Any, limit: int = 120) -> str:
 
 def clip_words(value: Any, limit: int = 200) -> str:
     """Length cap on a word boundary -- no '...' truncation artifact."""
-    text = re.sub(r"\s+", " ", re.sub(r"[\r\n\t]+", " ", str(value or ""))).strip()
+    text = lcd_clean_text(value)
     if len(text) <= limit:
         return text
     cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
@@ -132,7 +168,7 @@ def clip_words(value: Any, limit: int = 200) -> str:
 def clip_sentence(value: Any, limit: int = 210) -> str:
     """Keep whole sentences. Over the limit, end on the last . ! ? so the line
     reads complete (never a mid-sentence chop); fall back to a word boundary."""
-    text = re.sub(r"\s+", " ", re.sub(r"[\r\n\t]+", " ", str(value or ""))).strip()
+    text = lcd_clean_text(value)
     if len(text) <= limit:
         return text
     window = text[:limit]
@@ -511,7 +547,7 @@ def parse_local_line(tag: str, channel: str, line: str, sort_ts: float) -> LcdEv
         source=tag,
         channel=channel,
         nick=nick,
-        text=clip_sentence(body, LCD_EVENT_TEXT_CLIP),
+        text=clip_sentence(normalize_lcd_body(body), LCD_EVENT_TEXT_CLIP),
         kind=kind,
         canon="irc" if tag != "PBX" else "ops",
         ts=ts,
@@ -571,7 +607,11 @@ def celes_events(limit: int = 80) -> tuple[list[LcdEvent], dict[str, Any]]:
         elif chan == "#pseudocorp":
             source = "PCORP"
         nick = short_text(row.get("nick"), 32)
-        text = clip_sentence(row.get("text"), LCD_EVENT_TEXT_CLIP)
+        raw_text = str(row.get("text") or "")
+        wire = re.match(r"^:(?P<nick>[^!\s]+)!", raw_text)
+        if wire and not nick:
+            nick = short_text(wire.group("nick"), 32)
+        text = clip_sentence(normalize_lcd_body(raw_text), LCD_EVENT_TEXT_CLIP)
         if feed_line_is_noise(nick, text):
             continue
         events.append(
@@ -894,7 +934,7 @@ def parse_irc_protocol_line(line: str) -> LcdEvent | None:
             source=source,
             channel=chan,
             nick=short_text(nick, 32),
-            text=clip_sentence(msg, LCD_EVENT_TEXT_CLIP),
+            text=clip_sentence(normalize_lcd_body(msg), LCD_EVENT_TEXT_CLIP),
             kind=kind,
             canon="irc",
             ts=now_iso(),

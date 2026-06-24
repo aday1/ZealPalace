@@ -327,14 +327,14 @@ All components run as systemd services:
 Sometimes you need to burn it all down. That's what `meteor_wipe.sh` is for:
 
 ```bash
-# Soft wipe — clears NPC state, world data, journals (soul.json survives)
+# Meteor wipe — clears state, web, IRC/RPG logs, nginx/ngircd, journals (soul.json survives)
 ssh pi 'bash /path/to/meteor_wipe.sh'
 
-# Full genesis reset — factory reset absolutely everything
+# Genesis — also syslog, auth, apt history, login history, bash history
 ssh pi 'bash /path/to/meteor_wipe.sh -genesis'
 ```
 
-The soft wipe keeps `soul.json` (Zealot's personality survives the apocalypse). The `-genesis` flag resets everything. New world. New NPCs. New drama. The bots will immediately start fighting again within minutes.
+The meteor wipe is a true fresh start: no preserved IRC/RPG logs or nginx/ngircd history. `soul.json` (Zealot's personality in `~/.local/bin`) survives. `-genesis` goes further and scorches system logs and shell history too.
 
 ### If It Doesn't Work
 
