@@ -2709,17 +2709,20 @@ def event_display_rows(
         msg_style = "EVT"
     else:
         msg_style = "IRC_MSG"
-    # Username highlighted in a bracket of its own unique bright color.
-    if nick and event.kind not in ("presence", "status"):
+    # Bracketed bright nick ONLY for real chatter (someone speaking/acting).
+    # Lore/GM/bridge/status events are narration, not a speaker -- no fake nick.
+    if nick and event.kind in ("message", "action"):
         nick_segments = [("[", nick_style), (nick, nick_style), ("] ", nick_style)]
 
-    prefix_len = sum(len(text) for text, _style in meta + nick_segments)
-    first_room = max(1, width - prefix_len)
-    body_lines = _wrap_event_body(body, first_room, width, max(1, max_body_lines))
-
     # A real IRC line (someone actually spoke/acted) gets a RED end-of-line dot
-    # so a complete sentence is unmistakable from a truncated one.
+    # so a complete sentence is unmistakable from a truncated one. Reserve one
+    # column for it so a full-width last line never truncates the dot away.
     real_line = bool(nick) and event.kind in ("message", "action")
+    dot_reserve = 1 if real_line else 0
+    prefix_len = sum(len(text) for text, _style in meta + nick_segments)
+    first_room = max(1, width - prefix_len - dot_reserve)
+    body_lines = _wrap_event_body(body, first_room, max(1, width - dot_reserve), max(1, max_body_lines))
+
     last_idx = len(body_lines) - 1
     rows: list[list[tuple[str, str]]] = []
     for idx, chunk in enumerate(body_lines):

@@ -662,7 +662,7 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
             )
         ]
 
-    for idx, row in enumerate(snapshot.get("lore_recent", [])[-6:]):
+    for idx, row in enumerate(snapshot.get("lore_recent", [])[-2:]):
         if not isinstance(row, dict):
             continue
         ts = str(row.get("ts") or row.get("created_at") or "")
@@ -683,7 +683,7 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
     bridge = snapshot.get("bridge") or {}
     raw_events = bridge.get("events", []) if isinstance(bridge, dict) else []
     if isinstance(raw_events, list):
-        for idx, row in enumerate(raw_events[-8:]):
+        for idx, row in enumerate(raw_events[-2:]):
             if not isinstance(row, dict):
                 continue
             ts = str(row.get("ts") or "")
