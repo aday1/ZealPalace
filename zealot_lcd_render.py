@@ -121,7 +121,7 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0624c"
+LCD_TICKER_VERSION = "tkr0624d"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -2738,32 +2738,58 @@ def event_display_rows(
     return rows
 
 
+def _event_body_key(event: LcdEvent) -> str:
+    body = re.sub(r"\s+", " ", str(event.text or "")).strip()
+    return f"{event.source}|{event.channel}|{event.nick}|{event.kind}|{event.sort_ts}|{body[:96]}"
+
+
 def event_display_entries(
     event: LcdEvent,
     width: int = WIDTH,
     now: float | None = None,
     max_body_lines: int = LCD_EVENT_MAX_BODY_LINES,
-) -> list[tuple[list[tuple[str, str]], str, bool]]:
-    """Segments plus stable line key and cursor eligibility for typewriter draw."""
-    rows = event_display_rows(event, width, now=now, max_body_lines=max_body_lines)
+) -> list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]]:
+    """Prefix/body split, line key, event base, sort_ts, and typeable flag."""
+    now_ts = time.time() if now is None else now
     body = re.sub(r"\s+", " ", str(event.text or "")).strip()
-    base = f"{event.source}|{event.channel}|{event.nick}|{event.kind}|{event.sort_ts}|{body[:96]}"
-    cursor_ok = bool(body) and event.kind not in ("presence", "status")
-    full_count = len(
-        event_display_rows(event, width, now=now, max_body_lines=999)
-    )
-    truncated = full_count > max(1, max_body_lines)
-    last = len(rows) - 1
-    out: list[tuple[list[tuple[str, str]], str, bool]] = []
-    for idx, segments in enumerate(rows):
-        line_key = f"{base}|{idx}"
-        eligible = cursor_ok and idx == last and not truncated
-        out.append((segments, line_key, eligible))
+    nick = _event_nick_label(event)
+    nick_style = event_nick_style(event)
+
+    if event.kind in ("presence", "status") and not body:
+        body = f"{nick} {event.kind}".strip()
+
+    meta = event_prefix_segments(event, now_ts, width)
+    nick_segments: list[tuple[str, str]] = []
+    if event.kind == "action":
+        msg_style = "GRAY"
+    elif event.kind != "message" or _event_is_realm(event):
+        msg_style = "EVT"
+    else:
+        msg_style = "IRC_MSG"
+    if nick and event.kind in ("message", "action"):
+        nick_segments = [("[", nick_style), (nick, nick_style), ("] ", nick_style)]
+
+    typeable = bool(body) and event.kind in ("message", "action")
+    cursor_reserve = 1 if typeable else 0
+    prefix_len = sum(len(text) for text, _style in meta + nick_segments)
+    first_room = max(1, width - prefix_len - cursor_reserve)
+    cont_room = max(1, width - cursor_reserve)
+    body_lines = _wrap_event_body(body, first_room, cont_room, max(1, max_body_lines))
+
+    event_base = _event_body_key(event)
+    out: list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]] = []
+    for idx, chunk in enumerate(body_lines):
+        prefix = [*meta, *nick_segments] if idx == 0 else []
+        body_seg = [(chunk, msg_style)] if chunk else []
+        line_key = f"{event_base}|{idx}"
+        out.append((prefix, body_seg, line_key, event_base, float(event.sort_ts or 0.0), typeable))
+    if not out:
+        out.append(([*meta, *nick_segments], [], f"{event_base}|0", event_base, float(event.sort_ts or 0.0), typeable))
     return out
 
 
-LCD_TYPEWRITER_CPS = 26.0
-LCD_CURSOR_BLINK_SEC = 0.5
+LCD_TYPEWRITER_CPS = 22.0
+LCD_CURSOR_BLINK_SEC = 0.45
 LCD_CURSOR_CHAR = "\u2588"
 LCD_CURSOR_STYLE = "CURSOR"
 
@@ -2819,7 +2845,7 @@ class LcdTypewriter:
         return int(now / LCD_CURSOR_BLINK_SEC) % 2 == 0
 
     def prepare(self, rows: list[tuple[str, int]], now: float) -> None:
-        """Register staggered start times for new visible rows: (line_key, content_len)."""
+        """Register staggered start times for rows being typed: (line_key, body_len)."""
         if not self._primed:
             self.prime([key for key, _length in rows], now)
             return
@@ -2829,40 +2855,42 @@ class LcdTypewriter:
                 continue
             self._seen.add(key)
             self._started[key] = now + delay
-            delay += max(1, length) / LCD_TYPEWRITER_CPS + 0.04
+            delay += max(1, length) / LCD_TYPEWRITER_CPS + 0.06
 
     def reveal(
         self,
-        segments: list[tuple[str, str]],
+        prefix_segments: list[tuple[str, str]],
+        body_segments: list[tuple[str, str]],
         line_key: str,
         now: float,
         width: int,
         *,
-        cursor_eligible: bool,
+        animate: bool,
     ) -> list[tuple[str, str]]:
-        chars = _segments_content_chars(segments, width)
-        content_len = len(chars)
-        if not self._primed:
-            return segments
+        full = pad_colored_segments([*prefix_segments, *body_segments], width)
+        if not animate or not self._primed:
+            return full
+
+        prefix_chars = _segments_content_chars(prefix_segments, width)
+        prefix_len = len(prefix_chars)
+        body_chars = _segments_content_chars(body_segments, width)
+        body_len = len(body_chars)
+        if body_len <= 0:
+            return full
+
         start = self._started.get(line_key, now)
         elapsed = max(0.0, now - start)
-        visible = min(content_len, int(elapsed * LCD_TYPEWRITER_CPS))
-        cursor_room = 1 if cursor_eligible else 0
-        max_cols = max(0, width - cursor_room)
-        blink = self.cursor_blink_on(now)
+        visible = min(body_len, int(elapsed * LCD_TYPEWRITER_CPS))
 
-        if visible < content_len:
-            out = chars[: min(visible, max_cols)]
-            if blink and len(out) < max_cols:
-                out.append((LCD_CURSOR_CHAR, LCD_CURSOR_STYLE))
-            return _chars_to_segments(out, width)
+        if visible >= body_len:
+            return _chars_to_segments(prefix_chars + body_chars, width)
 
-        out = chars[:content_len]
-        if cursor_eligible and blink:
-            if len(out) >= width:
-                out = chars[: max(0, width - 1)]
-            if len(out) < width:
-                out.append((LCD_CURSOR_CHAR, LCD_CURSOR_STYLE))
+        if visible <= 0:
+            return _chars_to_segments(prefix_chars, width)
+
+        out = prefix_chars + body_chars[:visible]
+        if self.cursor_blink_on(now) and len(out) < width:
+            out.append((LCD_CURSOR_CHAR, LCD_CURSOR_STYLE))
         return _chars_to_segments(out, width)
 
 

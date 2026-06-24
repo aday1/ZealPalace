@@ -227,36 +227,46 @@ class LcdRenderTests(unittest.TestCase):
         self.assertIn("GRAY", act_styles)       # actions -> gray
         self.assertIn("EVT", realm_styles)      # realm/system -> light green
 
-    def test_event_typewriter_cursor_on_complete_line(self):
+    def test_event_typewriter_cursor_while_typing(self):
         event = LcdEvent("ZP", "#RPG", "Yomiko", "lets raid the caves", sort_ts=1.0)
         entries = event_display_entries(event, WIDTH, now=100.0, max_body_lines=4)
-        segments, line_key, eligible = entries[-1]
-        self.assertTrue(eligible)
+        prefix, body, line_key, _base, _ts, typeable = entries[-1]
+        self.assertTrue(typeable)
+        tw = LcdTypewriter()
+        tw._primed = True
+        tw._started[line_key] = 99.7
+        mid = tw.reveal(prefix, body, line_key, 100.0, WIDTH, animate=True)
+        styles = {s for _t, s in mid}
+        text = "".join(part for part, _style in mid)
+        self.assertIn("CURSOR", styles)
+        self.assertIn("[", text)
+        body_text = "".join(t for t, _s in body)
+        shown_body = "".join(t for t, s in mid if s == "IRC_MSG")
+        self.assertLess(len(shown_body), len(body_text))
+
+    def test_event_typewriter_no_cursor_when_done(self):
+        event = LcdEvent("ZP", "#RPG", "Yomiko", "lets raid the caves", sort_ts=1.0)
+        entries = event_display_entries(event, WIDTH, now=100.0, max_body_lines=4)
+        prefix, body, line_key, _base, _ts, typeable = entries[-1]
         tw = LcdTypewriter()
         tw.prime([line_key], 100.0)
-        shown = tw.reveal(segments, line_key, 1099.0, WIDTH, cursor_eligible=True)
-        text = "".join(part for part, _style in shown).rstrip()
-        self.assertIn("caves", text)
-        styles = {s for _t, s in shown}
-        self.assertIn("CURSOR", styles)
-
-    def test_event_no_cursor_when_truncated(self):
-        event = LcdEvent("ZP", "#RPG", "Yomiko", "word " * 200, sort_ts=1.0)
-        entries = event_display_entries(event, WIDTH, now=100.0, max_body_lines=4)
-        self.assertFalse(any(eligible for _seg, _key, eligible in entries))
+        done = tw.reveal(prefix, body, line_key, 1099.0, WIDTH, animate=True)
+        styles = {s for _t, s in done}
+        self.assertNotIn("CURSOR", styles)
+        self.assertIn("caves", "".join(part for part, _style in done))
 
     def test_typewriter_types_progressively(self):
         event = LcdEvent("ZP", "#RPG", "Yomiko", "hello mesh friends", sort_ts=1.0)
         entries = event_display_entries(event, WIDTH, now=100.0, max_body_lines=4)
-        segments, line_key, eligible = entries[-1]
+        prefix, body, line_key, _base, _ts, typeable = entries[-1]
         tw = LcdTypewriter()
         tw._primed = True
         tw._started[line_key] = 10.0
-        early = tw.reveal(segments, line_key, 10.2, WIDTH, cursor_eligible=eligible)
-        late = tw.reveal(segments, line_key, 12.0, WIDTH, cursor_eligible=eligible)
-        early_len = len(_segments_content_chars(early, WIDTH))
-        late_len = len(_segments_content_chars(late, WIDTH))
-        self.assertLess(early_len, late_len)
+        early = tw.reveal(prefix, body, line_key, 10.3, WIDTH, animate=True)
+        late = tw.reveal(prefix, body, line_key, 12.0, WIDTH, animate=True)
+        early_body = "".join(t for t, s in early if s == "IRC_MSG")
+        late_body = "".join(t for t, s in late if s == "IRC_MSG")
+        self.assertLess(len(early_body), len(late_body))
 
     def test_top_status_has_no_week_marker(self):
         from zealot_lcd_render import top_status_line

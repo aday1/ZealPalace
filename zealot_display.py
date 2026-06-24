@@ -509,9 +509,9 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     # --- Demoscene FX strip: rotating greetz / tunnel bus / sparkle / raster ---
     add_line(stdscr, zones["fx_row"], demoscene_fx_row(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
 
-    # --- Events zone (reserved rows, tail-pinned, typewriter chatter) ---
+    # --- Events zone (reserved rows, tail-pinned, typewriter on newest line only) ---
     add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
-    event_draw_rows: list[tuple[list[tuple[str, str]], str, bool]] = []
+    event_draw_rows: list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]] = []
     for event in snapshot.get("events") or []:
         if event_is_recurring_noise(event):
             continue
@@ -520,23 +520,32 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         )
     event_slots = max(1, zones["events_end"] - zones["events_start"])
     event_draw_rows = event_draw_rows[-event_slots:]
+    newest_base = ""
+    newest_ts = -1.0
+    for _prefix, _body, _key, event_base, sort_ts, typeable in event_draw_rows:
+        if typeable and sort_ts >= newest_ts:
+            newest_ts = sort_ts
+            newest_base = event_base
     prep: list[tuple[str, int]] = []
-    for segments, line_key, _eligible in event_draw_rows:
-        prep.append((line_key, len(_segments_content_chars(segments, frame_w))))
+    for prefix, body, line_key, event_base, _sort_ts, typeable in event_draw_rows:
+        if typeable and event_base == newest_base:
+            prep.append((line_key, len(_segments_content_chars(body, frame_w))))
     active_keys = {key for key, _length in prep}
     _EVENT_TYPEWRITER.prune(active_keys)
     _EVENT_TYPEWRITER.prepare(prep, now)
     start_row = zones["events_end"] - len(event_draw_rows)
-    for idx, (segments, line_key, cursor_eligible) in enumerate(event_draw_rows):
+    for idx, (prefix, body, line_key, event_base, _sort_ts, typeable) in enumerate(event_draw_rows):
         row = start_row + idx
         if row < zones["events_start"] or row >= zones["events_end"]:
             continue
+        animate = typeable and event_base == newest_base
         typed = _EVENT_TYPEWRITER.reveal(
-            segments,
+            prefix,
+            body,
             line_key,
             now,
             frame_w,
-            cursor_eligible=cursor_eligible,
+            animate=animate,
         )
         add_segment_line(stdscr, row, typed, now=now)
 
