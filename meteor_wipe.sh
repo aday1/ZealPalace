@@ -28,7 +28,7 @@ run_lcd_anim() {
     if [ -e /dev/tty1 ]; then
         sudo chvt 1 >>"$log" 2>&1 || true
         sudo sh -c "printf '\033[2J\033[H\033[?25l' > /dev/tty1" 2>>"$log" || true
-        if sudo sh -c "env TERM=linux COLUMNS=40 LINES=34 PYTHONPATH='$PYTHONPATH' python3 '$py' > /dev/tty1 2>>'$log'"; then
+        if sudo sh -c "env TERM=linux COLUMNS=40 LINES=34 PYTHONPATH='$PYTHONPATH' python3 '$py' > /dev/tty1" 2>>"$log"; then
             echo "tty1 ok" >>"$log"
         else
             echo "tty1 failed exit=$?" >>"$log"
