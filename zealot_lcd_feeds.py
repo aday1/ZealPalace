@@ -133,6 +133,9 @@ def clip_sentence(value: Any, limit: int = 210) -> str:
     ends = list(re.finditer(r"[.!?]", window))
     if ends:
         return window[: ends[-1].end()].strip()
+    for idx in range(min(len(text), limit) - 1, -1, -1):
+        if text[idx] in ".!?":
+            return text[: idx + 1].strip()
     cut = window.rsplit(" ", 1)[0].rstrip(" ,;:-")
     return cut or window
 
@@ -880,6 +883,8 @@ def parse_irc_protocol_line(line: str) -> LcdEvent | None:
         )
     if cmd in ("JOIN", "PART") and parts:
         chan = (parts[-1] if cmd == "JOIN" else parts[1] if len(parts) > 1 else "").lstrip(":")
+        if nick.lower().startswith("lcd-ticker"):
+            return None
         return LcdEvent(
             source="IRC",
             channel=chan,
@@ -975,9 +980,13 @@ def dedupe_events(items: Iterable[LcdEvent], limit: int = 80) -> list[LcdEvent]:
 def event_is_recurring_noise(event: LcdEvent) -> bool:
     if event.stale:
         return True
+    if event.kind == "presence":
+        return True
     if feed_line_is_noise(event.nick, event.text):
         return True
     body = re.sub(r"\s+", " ", str(event.text or "")).strip().lower()
+    if body.startswith("join #") or body.startswith("part #"):
+        return True
     if event.kind == "status" and any(
         token in body
         for token in (

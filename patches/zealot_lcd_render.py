@@ -14,7 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
-from zealot_lcd_feeds import LcdEvent, parse_iso_ts, short_text
+from zealot_lcd_feeds import LcdEvent, clip_sentence, parse_iso_ts, short_text
 
 try:
     from zealot_sip_flash import (
@@ -56,7 +56,7 @@ LCD_MID_FOOTER_ROWS = 2
 LCD_FX_ROWS = 1
 LCD_EVENTS_HEADER_ROWS = 1
 LCD_EVENTS_MIN_ROWS = 8
-LCD_EVENT_MAX_BODY_LINES = 6
+LCD_EVENT_MAX_BODY_LINES = 8
 
 # Per-IRC-nick CGA color (Crystal Mesh party + terrarium NPCs).
 IRC_NICK_STYLES: dict[str, str] = {
@@ -121,7 +121,7 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0624d"
+LCD_TICKER_VERSION = "tkr0624e"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -2659,6 +2659,25 @@ def _wrap_event_body(
     return lines or [""]
 
 
+def _fit_event_body_lines(
+    body: str,
+    first_width: int,
+    cont_width: int,
+    max_lines: int,
+) -> list[str]:
+    """Wrap body to max_lines; if overflow, clip at the last whole sentence that fits."""
+    clean = re.sub(r"\s+", " ", str(body or "")).strip()
+    if not clean:
+        return [""]
+    full = _wrap_event_body(clean, first_width, cont_width, 999)
+    if len(full) <= max(1, max_lines):
+        return full
+    budget = max(first_width, first_width + cont_width * max(0, max_lines - 1))
+    clipped = clip_sentence(clean, budget)
+    lines = _wrap_event_body(clipped, first_width, cont_width, max(1, max_lines))
+    return lines[: max(1, max_lines)] or [""]
+
+
 def _event_nick_label(event: LcdEvent) -> str:
     return (event.nick or event.channel.strip("#") or event.kind or "").strip()
 
@@ -2723,7 +2742,7 @@ def event_display_rows(
     full_lines = _wrap_event_body(body, first_room, cont_room, 999)
     max_lines = max(1, max_body_lines)
     truncated = len(full_lines) > max_lines
-    body_lines = full_lines[:max_lines]
+    body_lines = _fit_event_body_lines(body, first_room, cont_room, max_lines)
 
     last_idx = len(body_lines) - 1
     rows: list[list[tuple[str, str]]] = []
@@ -2774,7 +2793,7 @@ def event_display_entries(
     prefix_len = sum(len(text) for text, _style in meta + nick_segments)
     first_room = max(1, width - prefix_len - cursor_reserve)
     cont_room = max(1, width - cursor_reserve)
-    body_lines = _wrap_event_body(body, first_room, cont_room, max(1, max_body_lines))
+    body_lines = _fit_event_body_lines(body, first_room, cont_room, max(1, max_body_lines))
 
     event_base = _event_body_key(event)
     out: list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]] = []
@@ -2788,7 +2807,7 @@ def event_display_entries(
     return out
 
 
-LCD_TYPEWRITER_CPS = 22.0
+LCD_TYPEWRITER_CPS = 32.0
 LCD_CURSOR_BLINK_SEC = 0.45
 LCD_CURSOR_CHAR = "\u2588"
 LCD_CURSOR_STYLE = "CURSOR"

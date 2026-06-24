@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import zealot_sip_flash
-from zealot_lcd_feeds import LcdEvent, dedupe_events, feed_line_is_noise, parse_local_line
+from zealot_lcd_feeds import LcdEvent, dedupe_events, event_is_recurring_noise, feed_line_is_noise, parse_local_line
 from zealot_lcd_render import (
     WIDTH,
     MODE_PERIOD_SEC,
@@ -268,7 +268,21 @@ class LcdRenderTests(unittest.TestCase):
         late_body = "".join(t for t, s in late if s == "IRC_MSG")
         self.assertLess(len(early_body), len(late_body))
 
-    def test_top_status_has_no_week_marker(self):
+    def test_event_body_clips_at_sentence_when_too_long(self):
+        body = (
+            "As the null breach tears across the realm, the partitions of sanity begin to destabilize, "
+            "causing data packets to splatter like digital blood across the disk arrays, while the "
+            "file system's corrupted sectors scream in agony until the backup tape finally spins up."
+        )
+        event = LcdEvent("ST", "bridge", "lore", body, canon="lore", sort_ts=1.0)
+        rows = event_display_rows(event, WIDTH, now=100.0, max_body_lines=4)
+        joined = " ".join("".join(t for t, _s in row) for row in rows).rstrip()
+        self.assertNotRegex(joined, r"file system'?s?\s*$")
+        self.assertNotRegex(joined, r"\bwhile the\s*$")
+
+    def test_presence_join_is_recurring_noise(self):
+        event = LcdEvent("IRC", "#RPG", "lcd-ticker", "join #RPG", kind="presence", sort_ts=1.0)
+        self.assertTrue(event_is_recurring_noise(event))
         from zealot_lcd_render import top_status_line
         row = top_status_line(datetime(2026, 6, 24, 13, 21).timestamp(), WIDTH)
         self.assertIn("ZEAL", row)
