@@ -4040,8 +4040,9 @@ def _cap_irc_line(text: str, limit: int = IRC_PARTY_MAX_CHARS) -> str:
     out = re.sub(r'\s+', ' ', str(text or '')).strip()
     if len(out) <= limit:
         return out
-    cut = out[:limit].rsplit(' ', 1)[0].rstrip(',.;:')
-    return (cut or out[:limit]).rstrip() + '...'
+    # Cut on a word boundary -- never mid-word, and no '...' truncation artifact.
+    cut = out[:limit].rsplit(' ', 1)[0].rstrip(' ,.;:-')
+    return cut or out[:limit]
 
 
 def _filter_memory_bits(bits: list[str]) -> list[str]:
