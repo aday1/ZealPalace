@@ -2372,11 +2372,22 @@ def mode_art(mode: str, now: float, width: int = WIDTH) -> list[str]:
         rows = list(RGB_BATTLE_FRAMES[int(anim_now(now, RGB_FRAME_SEC) // RGB_FRAME_SEC) % len(RGB_BATTLE_FRAMES)])
     else:
         rows = list(MODE_ART.get(mode, MODE_ART["lounge"]))
-    # Block-center: one shared left margin so the whole ASCII box stays aligned.
-    # (pad, not fit -- fit() strips the leading spaces that do the centering.)
+    # Block-center the ASCII box, then animate ANSI bands in the side margins
+    # (a one-column breathing gap keeps the centered text clean).
     block_w = max((len(row) for row in rows), default=0)
     left = max(0, (width - block_w) // 2)
-    return [pad(" " * left + row[:width], width) for row in rows]
+    right = left + block_w
+    bands = "._-=*=-."
+    tick = int(anim_now(now, 1.0))
+    out: list[str] = []
+    for i, row in enumerate(rows):
+        cells = list(pad(" " * left + row[:width], width))
+        for col in range(0, max(0, left - 1)):
+            cells[col] = bands[(tick + col + i) % len(bands)]
+        for col in range(right + 1, width):
+            cells[col] = bands[(tick - col + i) % len(bands)]
+        out.append("".join(cells)[:width])
+    return out
 
 
 def transition_text(text: Any, now: float, row: int, width: int = WIDTH, window: float = 2.25) -> str:
@@ -3224,23 +3235,19 @@ def rpg_panel(bridge: dict[str, Any], width: int, now: float | None = None) -> l
     if battle.get("active"):
         battle_line = short_text(battle.get("monster", {}).get("name"), 28)
     ts = time.time() if now is None else now
+    pop_value = (
+        f"NPC {bridge.get('npc_count', 0)} "
+        f"PL {bridge.get('players_total', 0)} "
+        f"GMQ {len(bridge.get('gm_pending') or [])}"
+    )
     return [
         (detail_kv_header(width), "CYAN"),
         (detail_kv_rule(width), "SYS"),
-        (detail_kv("ERA", short_text(bridge.get("era"), 80), width, now=ts), "RPG"),
-        (detail_kv("HOT ZONE", short_text(bridge.get("hot_zone"), 80), width, now=ts), "RPG"),
-        (
-            detail_kv(
-                "POPULATION",
-                f"NPC {bridge.get('npc_count', 0)}  PLAYERS {bridge.get('players_total', 0)}  "
-                f"GM QUEUE {len(bridge.get('gm_pending') or [])}",
-                width,
-                now=ts,
-            ),
-            "RPG",
-        ),
-        (detail_kv("BATTLE", battle_line, width, now=ts), "RPG"),
-        (detail_kv("ACTIVE NPC", " | ".join(npc_bits) or "waiting", width, now=ts), "RPG"),
+        (detail_kv("ERA", short_text(bridge.get("era"), 24), width, now=ts, scroll=False), "RPG"),
+        (detail_kv("HOT ZONE", short_text(bridge.get("hot_zone"), 24), width, now=ts, scroll=False), "RPG"),
+        (detail_kv("POPULATION", pop_value, width, now=ts, scroll=False), "RPG"),
+        (detail_kv("BATTLE", short_text(battle_line, 24), width, now=ts, scroll=False), "RPG"),
+        (detail_kv("ACTIVE NPC", short_text(" | ".join(npc_bits) or "waiting", 26), width, now=ts, scroll=False), "RPG"),
     ]
 
 
@@ -3367,16 +3374,17 @@ def bridge_panel(bridge: dict[str, Any], width: int, now: float | None = None) -
     return [
         (detail_kv_header(width), "CYAN"),
         (detail_kv_rule(width), "SYS"),
-        (detail_kv("BRIDGE", "online" if bridge.get("ok") else "offline", width, now=ts), "ST"),
-        (detail_kv("DISPLAY", "co-canon SillyTavern + IRC", width, now=ts), "ST"),
-        (detail_kv("POLICY", "private memory visible; GM confirms actions", width, now=ts), "GMQ"),
+        (detail_kv("BRIDGE", "online" if bridge.get("ok") else "offline", width, now=ts, scroll=False), "ST"),
+        (detail_kv("DISPLAY", "SillyTavern + IRC co-canon", width, now=ts, scroll=False), "ST"),
+        (detail_kv("POLICY", "GM confirms actions", width, now=ts, scroll=False), "GMQ"),
         (detail_kv_companion_segments("COMPANIONS", companions, width, now=ts), "ST"),
         (
             detail_kv(
                 "STATE SIZE",
-                f"memories {len(shared)}  relations {len(relationships)}",
+                f"mem {len(shared)} rel {len(relationships)}",
                 width,
                 now=ts,
+                scroll=False,
             ),
             "ST",
         ),

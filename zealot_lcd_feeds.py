@@ -554,9 +554,13 @@ def celes_events(limit: int = 80) -> tuple[list[LcdEvent], dict[str, Any]]:
     return events, status
 
 
+_LAST_BRIDGE_GOOD: dict[str, Any] = {}
+
+
 def bridge_snapshot() -> dict[str, Any]:
+    global _LAST_BRIDGE_GOOD
     health, health_error = fetch_json(BRIDGE_HEALTH_URL, timeout=0.7)
-    state, state_error = fetch_json(BRIDGE_STATE_URL, timeout=1.4)
+    state, state_error = fetch_json(BRIDGE_STATE_URL, timeout=2.5)
     ok = isinstance(state, dict) and bool(state.get("ok"))
     bridge = state.get("sillytavern_bridge", {}) if isinstance(state, dict) else {}
     world = state.get("world", {}) if isinstance(state, dict) else {}
@@ -604,7 +608,14 @@ def bridge_snapshot() -> dict[str, Any]:
                     }
                 )
 
-    return {
+    # Fetch hiccup: keep showing the last known population instead of blanking to 0.
+    if not ok and _LAST_BRIDGE_GOOD:
+        if not active_npcs:
+            active_npcs = _LAST_BRIDGE_GOOD.get("npc_active") or []
+        if not companions:
+            companions = _LAST_BRIDGE_GOOD.get("companions") or []
+
+    result: dict[str, Any] = {
         "ok": ok,
         "health_ok": isinstance(health, dict) and bool(health.get("ok")),
         "error": state_error or health_error,
@@ -615,7 +626,8 @@ def bridge_snapshot() -> dict[str, Any]:
         "hot_zone": hot_zone,
         "npc_active": active_npcs,
         "npc_count": len(active_npcs),
-        "players_total": state.get("players_total", 0) if isinstance(state, dict) else 0,
+        "players_total": (state.get("players_total", 0) if isinstance(state, dict) else 0)
+        or (_LAST_BRIDGE_GOOD.get("players_total", 0) if not ok else 0),
         "battle": battle if isinstance(battle, dict) else {},
         "realm_event": state.get("realm_event") if isinstance(state, dict) else None,
         "gm_pending": gm_pending if isinstance(gm_pending, list) else [],
@@ -626,6 +638,9 @@ def bridge_snapshot() -> dict[str, Any]:
         "companions": companions,
         "routes": bridge.get("persona_routes", {}) if isinstance(bridge, dict) else {},
     }
+    if ok:
+        _LAST_BRIDGE_GOOD = result
+    return result
 
 
 def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
