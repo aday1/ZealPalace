@@ -15,7 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
-from zealot_lcd_feeds import LcdEvent, clip_sentence, parse_iso_ts, short_text
+from zealot_lcd_feeds import LcdEvent, SPAWN_BODY_RE, clip_sentence, parse_iso_ts, short_text
 
 try:
     from zealot_sip_flash import (
@@ -75,6 +75,10 @@ NARRATIVE_EVENT_KINDS = frozenset(
         "notice",
         "world",
         "pulse",
+        "spawn",
+        "birth",
+        "rebirth",
+        "rpg",
     }
 )
 LCD_EVENT_DANGLING_WORDS = frozenset(
@@ -170,7 +174,7 @@ SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
 FOOTER_SCROLLER_SPEED = 0.35
 FOOTER_FRAME_PERIOD_SEC = 15.0
-LCD_TICKER_VERSION = "tkr0624p"
+LCD_TICKER_VERSION = "tkr0624q"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -2886,10 +2890,16 @@ def _line_ends_complete_thought(text: str) -> bool:
     return last not in LCD_EVENT_DANGLING_WORDS
 
 
-def _mark_truncated_line(line: str, room: int) -> str:
+def _mark_truncated_line(line: str, room: int, *, continued: bool = False) -> str:
     text = re.sub(r"\s+", " ", str(line or "")).strip()
     if not text or text.endswith("..."):
         return text[:room] if len(text) > room else text
+    if len(text) <= room:
+        if not continued and _line_ends_complete_thought(text):
+            return text
+        if len(text) + 3 <= room:
+            return text + "..."
+        return text[: max(0, room - 3)].rstrip() + "..."
     if len(text) + 3 <= room:
         return text + "..."
     return text[: max(0, room - 3)].rstrip() + "..."
@@ -2916,7 +2926,7 @@ def _fit_event_body_lines(
             lines.pop()
         if len(full) > len(lines) and lines:
             room = cont_width if len(lines) > 1 else first_width
-            lines[-1] = _mark_truncated_line(lines[-1], room)
+            lines[-1] = _mark_truncated_line(lines[-1], room, continued=True)
         return lines
 
     budget = max(first_width, first_width + cont_width * max(0, max_lines - 1))
@@ -2927,7 +2937,7 @@ def _fit_event_body_lines(
             out = lines[: max(1, max_lines)]
             if clipped != clean and out:
                 room = cont_width if len(out) > 1 else first_width
-                out[-1] = _mark_truncated_line(out[-1], room)
+                out[-1] = _mark_truncated_line(out[-1], room, continued=True)
             return out
         budget = int(budget * 0.82)
 
@@ -2936,7 +2946,7 @@ def _fit_event_body_lines(
         if _line_ends_complete_thought(lines[-1]):
             if take < len(full) and lines:
                 room = cont_width if take > 1 else first_width
-                lines[-1] = _mark_truncated_line(lines[-1], room)
+                lines[-1] = _mark_truncated_line(lines[-1], room, continued=True)
             return lines
 
     one = clip_sentence(clean, first_width)
@@ -2954,6 +2964,21 @@ EventDrawRow = tuple[
     float,
     bool,
 ]
+
+
+def _row_text(row: EventDrawRow) -> str:
+    prefix, body, *_rest = row
+    return "".join(text for text, _style in prefix) + "".join(text for text, _style in body)
+
+
+def _spawn_aware_tail(rows: list[EventDrawRow], slots: int) -> list[EventDrawRow]:
+    if not rows:
+        return rows
+    if _event_base_kind(rows[0][3]) == "spawn":
+        verb_rows = [row for row in rows if SPAWN_BODY_RE.search(_row_text(row))]
+        if verb_rows:
+            return verb_rows[-slots:]
+    return rows[-slots:]
 
 
 def compact_event_draw_rows(
@@ -2992,13 +3017,13 @@ def compact_event_draw_rows(
         return compact
     newest_rows = grouped.get(newest_base, [])
     if len(newest_rows) >= slots:
-        tail = newest_rows[-slots:]
+        tail = _spawn_aware_tail(newest_rows, slots)
         if len(newest_rows) > slots and tail:
             prefix, body, line_key, event_base, sort_ts, typeable = tail[-1]
             body_text = "".join(text for text, _style in body)
             if body_text and not body_text.endswith("..."):
                 room = max(1, WIDTH - sum(len(text) for text, _style in prefix))
-                marked = _mark_truncated_line(body_text, room)
+                marked = _mark_truncated_line(body_text, room, continued=True)
                 if marked != body_text:
                     style = body[0][1] if body else "IRC_MSG"
                     tail[-1] = (prefix, [(marked, style)], line_key, event_base, sort_ts, typeable)
@@ -3055,6 +3080,7 @@ EVENT_KIND_STYLES: dict[str, str] = {
     "notice": "LOG",
     "react": "ZH",
     "rebirth": "GREEN",
+    "spawn": "GREEN",
     "gm_queue": "GMQ",
     "gm": "GMQ",
     "bridge": "ST",
@@ -3160,6 +3186,8 @@ def _event_base_kind(event_base: str) -> str:
 
 def event_old_max_lines(event: LcdEvent) -> int:
     kind = str(event.kind or "message").lower()
+    if kind in ("spawn", "birth", "rebirth", "rpg"):
+        return LCD_EVENT_OLD_NARRATIVE_LINES
     if kind in ("message", "action"):
         return LCD_EVENT_OLD_CHATTER_LINES
     if kind in NARRATIVE_EVENT_KINDS or event.source in ("ST", "GMQ"):
@@ -3168,10 +3196,12 @@ def event_old_max_lines(event: LcdEvent) -> int:
 
 
 def _older_event_slice(chunk: list[EventDrawRow], event_base: str, limit: int) -> list[EventDrawRow]:
-    """Chatter and narration keep the top of the wrap; only status tails use last lines."""
+    """Narration and spawn lines keep the tail so 'materializes at X' survives compaction."""
     take = max(1, limit)
     kind = _event_base_kind(event_base)
-    if kind in NARRATIVE_EVENT_KINDS or kind in ("message", "action"):
+    if kind in NARRATIVE_EVENT_KINDS or kind in ("spawn", "birth", "rebirth", "rpg"):
+        return chunk[-take:]
+    if kind in ("message", "action"):
         return chunk[:take]
     return chunk[-take:]
 

@@ -79,6 +79,11 @@ FEED_NOISE_RE = re.compile(
     r"\.local/bin/|tmux\s|bash\s+[\"']?\$|python3?\s+.*zealot_display)"
 )
 FEED_NOISE_NICKS = frozenset({"aday", "lcd-ticker", "lcd_ticker"})
+LOG_TS_RE = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?[ap]?)\s+", re.I)
+SPAWN_BODY_RE = re.compile(
+    r"\b(materializ\w+|spawns?\b|coalesces|returns to|crystallizes|emerges from|reborn|adventurers)\b",
+    re.I,
+)
 
 
 @dataclass
@@ -465,36 +470,48 @@ def parse_local_line(tag: str, channel: str, line: str, sort_ts: float) -> LcdEv
     kind = "message"
     body = text
     ts = ""
+    parsed_irc = False
 
-    first, _, rest = body.partition(" ")
-    if ":" in first and first[-1:].lower() in ("a", "p"):
-        ts = first
-        body = rest.strip()
+    ts_match = LOG_TS_RE.match(body)
+    if ts_match:
+        ts = ts_match.group(1)
+        body = body[ts_match.end() :].strip()
+    else:
+        first, _, rest = body.partition(" ")
+        if ":" in first and first[-1:].lower() in ("a", "p"):
+            ts = first
+            body = rest.strip()
 
     if body.startswith("<") and ">" in body:
         end = body.find(">")
         nick = body[1:end]
         body = body[end + 1 :].strip()
+        parsed_irc = True
     elif body.startswith("* "):
         kind = "action"
         parts = body[2:].split(" ", 1)
         nick = parts[0] if parts else ""
         body = parts[1] if len(parts) > 1 else body[2:]
+        parsed_irc = True
     elif " joined " in body or " has left " in body:
         kind = "presence"
         nick = body.split(" ", 1)[0]
+        parsed_irc = True
     elif tag == "PBX":
         nick = "CELES-PBX"
         kind = "pbx"
-    elif tag == "RPG":
+    elif tag == "RPG" and not parsed_irc:
         nick = "DungeonMaster"
         kind = "rpg"
+
+    if SPAWN_BODY_RE.search(body):
+        kind = "spawn"
 
     event = LcdEvent(
         source=tag,
         channel=channel,
-        nick=short_text(nick, 24),
-        text=short_text(body, 260),
+        nick=nick,
+        text=clip_sentence(body, LCD_EVENT_TEXT_CLIP),
         kind=kind,
         canon="irc" if tag != "PBX" else "ops",
         ts=ts,
@@ -553,7 +570,7 @@ def celes_events(limit: int = 80) -> tuple[list[LcdEvent], dict[str, Any]]:
             source = "ZP"
         elif chan == "#pseudocorp":
             source = "PCORP"
-        nick = short_text(row.get("nick"), 24)
+        nick = short_text(row.get("nick"), 32)
         text = clip_sentence(row.get("text"), LCD_EVENT_TEXT_CLIP)
         if feed_line_is_noise(nick, text):
             continue
@@ -865,6 +882,8 @@ def parse_irc_protocol_line(line: str) -> LcdEvent | None:
         if msg.startswith("\x01ACTION") and msg.endswith("\x01"):
             kind = "action"
             msg = msg.replace("\x01ACTION", "", 1).strip("\x01 ").strip()
+        if SPAWN_BODY_RE.search(msg):
+            kind = "spawn"
         source = {
             "#RPG": "RPG",
             "#ZealHangs": "ZH",
@@ -874,7 +893,7 @@ def parse_irc_protocol_line(line: str) -> LcdEvent | None:
         return LcdEvent(
             source=source,
             channel=chan,
-            nick=short_text(nick, 24),
+            nick=short_text(nick, 32),
             text=clip_sentence(msg, LCD_EVENT_TEXT_CLIP),
             kind=kind,
             canon="irc",

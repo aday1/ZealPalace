@@ -84,6 +84,33 @@ class LcdFeedTests(unittest.TestCase):
         self.assertEqual(event.kind, "action")
         self.assertEqual(event.nick, "Hex")
 
+    def test_parse_local_spawn_materialize(self):
+        event = parse_local_line(
+            "RPG",
+            "#RPG",
+            "12:54p <DungeonMaster> ░▒▓ Yomiko materializes at Hall of Processes!",
+            1.0,
+        )
+        self.assertEqual(event.kind, "spawn")
+        self.assertIn("materializes", event.text)
+        self.assertNotIn("...", event.text)
+
+    def test_spawn_compaction_keeps_materialize_tail(self):
+        from zealot_lcd_render import event_display_entries, compact_event_draw_rows, _event_body_key
+
+        event = parse_local_line(
+            "RPG",
+            "#RPG",
+            "12:54p <DungeonMaster> ░▒▓ Yomiko materializes at Hall of Processes!",
+            1.0,
+        )
+        rows = event_display_entries(event, WIDTH, now=200.0, max_body_lines=4)
+        newest = _event_body_key(event)
+        out = compact_event_draw_rows(rows, 2, newest, older_tail_lines=1)
+        joined = "".join("".join(t for t, _s in p) + "".join(t for t, _s in b) for p, b, *_ in out)
+        self.assertIn("Processes", joined)
+        self.assertIn("materializes", joined)
+
     def test_dedupe_keeps_one(self):
         one = LcdEvent("ST", "bridge", "Yomiko", "memory", sort_ts=1)
         two = LcdEvent("ST", "bridge", "Yomiko", "memory", sort_ts=2)
