@@ -511,10 +511,12 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         )
     event_slots = max(1, zones["events_end"] - zones["events_start"])
     event_slot_rows = event_slot_rows[-event_slots:]
+    # Bottom-pin chatter like a chat log: freshest line sits just above the input row.
+    start_row = zones["events_end"] - len(event_slot_rows)
     for idx, segments in enumerate(event_slot_rows):
-        row = zones["events_start"] + idx
-        if row >= zones["events_end"]:
-            break
+        row = start_row + idx
+        if row < zones["events_start"] or row >= zones["events_end"]:
+            continue
         add_segment_line(stdscr, row, segments, now=now)
 
     if input_buf:

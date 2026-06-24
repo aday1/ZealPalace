@@ -280,6 +280,7 @@ class WeeklyCountdownTests(unittest.TestCase):
         self.assertEqual(work_week_phase(datetime.fromtimestamp(now)), "work")
         row = work_week_countdown_line(now, WIDTH)
         self.assertEqual(len(row), WIDTH)
+        self.assertIn("FRI", row)
         self.assertIn("*#", row)
         self.assertIn("%", row)
 
@@ -287,7 +288,7 @@ class WeeklyCountdownTests(unittest.TestCase):
         now = datetime(2026, 6, 17, 12, 0).timestamp()
         row = weekend_monday_countdown_line(now, WIDTH)
         self.assertEqual(len(row), WIDTH)
-        self.assertIn("WORK", row)
+        self.assertIn("MON", row)
 
     def test_weekend_phase_saturday(self):
         now = datetime(2026, 6, 20, 12, 0).timestamp()
@@ -296,7 +297,7 @@ class WeeklyCountdownTests(unittest.TestCase):
         mon = weekend_monday_countdown_line(now, WIDTH)
         self.assertEqual(len(wk), WIDTH)
         self.assertEqual(len(mon), WIDTH)
-        self.assertIn("TO-MON", mon)
+        self.assertIn("MON", mon)
         self.assertIn("*#", mon)
 
     def test_monday_pre_open_edge(self):

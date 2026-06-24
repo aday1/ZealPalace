@@ -127,7 +127,7 @@ Copy systemd units from this repo's `*.service` files as reference.
 | LLM | Ollama on ZealTower only — never on Pi or CELES |
 | State | JSON files — no database |
 | IRC | `#ZealPalace`, `#ZealHangs`, `#RPG` |
-| LCD | 40x34 CGA curses, Terminus, demoscene boot |
+| LCD | 40x34 CGA curses, Terminus, demoscene boot - full zone map in `Docs/LCD-LAYOUT.md` |
 | Tone | Zealot terrarium voice; no emoji in source |
 
 ## Build and run (dev)

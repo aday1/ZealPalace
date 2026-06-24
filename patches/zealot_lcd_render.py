@@ -320,23 +320,13 @@ def normalize_line(text: Any) -> str:
 
 
 def calendar_segments(now: float | None = None, width: int = WIDTH) -> list[tuple[str, str]]:
-    """Calendar row — centered date bracket + work-week ANSI bar."""
+    """Calendar row — full weekday + date + ISO week, centered (week bars live in header)."""
     ts = time.time() if now is None else now
     dt = datetime.fromtimestamp(ts)
     month = MONTH_NAMES[max(0, min(11, dt.month - 1))]
-    core = f"{dt:%a} {dt.day:02d} {month}"
-    wk_room = max(12, min(22, (width * 9) // 20))
-    date_room = max(10, width - wk_room - 1)
-    date_segs = flourished_title_segments(
-        core,
-        ts,
-        width,
-        salt="calendar",
-        title_style="CYAN",
-        pad_to=date_room,
-    )
-    week_segs = work_week_compact_segments(ts, wk_room)
-    return justify_colored_segments([*date_segs, (" ", "SYS"), *week_segs], width, align="center")
+    iso_week = max(1, min(52, int(dt.isocalendar().week)))
+    core = f"{dt:%A} {dt.day:02d} {month} - Week {iso_week}/52"
+    return flourished_title_segments(core, ts, width, salt="calendar", title_style="CYAN", pad_to=width)
 
 
 def _weekly_milestones(dt: datetime) -> tuple[datetime, datetime, datetime]:
@@ -390,6 +380,60 @@ def work_week_progress(dt: datetime) -> tuple[float, int, str, str, str]:
     pct_val = _span_pct(fri_17, next_mon_10, dt)
     left = max(0, int((next_mon_10 - dt).total_seconds()))
     return pct_val, int(round(pct_val)), fmt_duration_short(left), "TO-MON", "MAG"
+
+
+def _fri_progress(dt: datetime) -> tuple[float, int]:
+    """Progress + seconds toward this work-week's Friday 17:00 (100% once closed)."""
+    mon_10, fri_17, _next_mon_10 = _weekly_milestones(dt)
+    if dt >= fri_17:
+        return 100.0, 0
+    return _span_pct(mon_10, fri_17, dt), max(0, int((fri_17 - dt).total_seconds()))
+
+
+def _mon_progress(dt: datetime) -> tuple[float, int]:
+    """Progress + seconds toward Monday 10:00 (0% fill while still inside the work week)."""
+    _mon_10, fri_17, next_mon_10 = _weekly_milestones(dt)
+    secs = max(0, int((next_mon_10 - dt).total_seconds()))
+    if work_week_phase(dt) == "weekend":
+        return _span_pct(fri_17, next_mon_10, dt), secs
+    return 0.0, secs
+
+
+def labeled_week_rail(
+    now: float,
+    width: int,
+    label: str,
+    pct_val: float,
+    dur_secs: int,
+    bar_style: str,
+) -> list[tuple[str, str]]:
+    """Normalized weekly counter: <LABEL> [*###---*] pct countdown, padded to width."""
+    if width < 10:
+        return [(fit(label, width), bar_style)]
+    pct = int(round(pct_val))
+    dur = fmt_duration_short(dur_secs)
+    plb, prb, pstyle = flourish_bar_brackets(now, label)
+    prefix: list[tuple[str, str]] = [(plb, pstyle), (label, "CYAN"), (prb, pstyle), (" ", "SYS")]
+    prefix_len = sum(len(text) for text, _style in prefix)
+    blb, brb, bbst = flourish_bar_brackets(now, label + "-bar")
+    fixed = prefix_len + len(blb) + len(brb)
+    for tail in (f" {pct}% {dur}", f" {pct}%", f" {dur}", ""):
+        bar_w = width - fixed - len(tail)
+        if bar_w >= 6:
+            segments: list[tuple[str, str]] = [
+                *prefix,
+                (blb, bbst),
+                *progress_bar_segments(pct_val, bar_w, bar_style),
+                (brb, bbst),
+            ]
+            if tail:
+                segments.extend(countdown_tail_segments(pct, dur, now, "GREEN"))
+            return pad_colored_segments(segments, width)
+    bar_w = max(3, width - fixed)
+    return pad_colored_segments(
+        [*prefix, (blb, bbst), *progress_bar_segments(pct_val, bar_w, bar_style), (brb, bbst)],
+        width,
+    )
 
 
 def progress_bar_segments(
@@ -576,42 +620,21 @@ def work_week_rail_segments(
 
 
 def work_week_compact_segments(now: float, width: int) -> list[tuple[str, str]]:
-    return work_week_rail_segments(now, width, compact=False, pad_to_width=True)
+    """Friday counter — progress through the work week toward Fri 17:00."""
+    dt = datetime.fromtimestamp(now)
+    pct_val, secs = _fri_progress(dt)
+    return labeled_week_rail(now, width, "FRI", pct_val, secs, "GREEN")
 
 
 def weekend_monday_countdown_segments(
     now: float | None = None,
     width: int = WIDTH,
 ) -> list[tuple[str, str]]:
+    """Monday counter — progress through the weekend toward Mon 10:00."""
     ts = time.time() if now is None else now
     dt = datetime.fromtimestamp(ts)
-    pct_val, pct, dur, phase, bar_style = work_week_progress(dt)
-    in_weekend = work_week_phase(dt) == "weekend"
-    plb, prb, pstyle = flourish_bar_brackets(ts, phase)
-    prefix: list[tuple[str, str]] = [
-        (plb, pstyle),
-        (phase, "CYAN"),
-        (prb, pstyle),
-        (" ", "SYS"),
-    ]
-    prefix_len = sum(len(text) for text, _style in prefix)
-    tail_opts = (f" {pct}% {dur}", f" {pct}%", f" {dur}", "")
-    for tail in tail_opts:
-        bar_lb, bar_rb, bar_bstyle = flourish_bar_brackets(ts, "tomon-bar")
-        overhead = prefix_len + len(bar_lb) + len(bar_rb) + len(tail)
-        bar_w = max(8, width - overhead)
-        if bar_w >= 8 or not tail:
-            segments: list[tuple[str, str]] = [
-                *prefix,
-                (bar_lb, bar_bstyle),
-                *progress_bar_segments(pct_val, bar_w, bar_style),
-                (bar_rb, bar_bstyle),
-            ]
-            if tail:
-                tail_style = "MAG" if in_weekend else "GREEN"
-                segments.extend(countdown_tail_segments(pct, dur, ts, tail_style))
-            return pad_colored_segments(segments, width)
-    return [(pad("[????]", width), "SYS")]
+    pct_val, secs = _mon_progress(dt)
+    return labeled_week_rail(ts, width, "MON", pct_val, secs, "MAG")
 
 
 def zeal_clock_segments(now: float, max_width: int) -> list[tuple[str, str]]:
@@ -647,8 +670,18 @@ def zeal_clock_bit(now: float, max_len: int | None = None) -> str:
 
 
 def top_status_segments(now: float | None = None, width: int = WIDTH) -> list[tuple[str, str]]:
+    """Top row: ZEAL clock + ISO week on the left, Friday counter filling the rest."""
     ts = time.time() if now is None else now
-    return pad_colored_segments(zeal_clock_segments(ts, width), width)
+    dt = datetime.fromtimestamp(ts)
+    iso_week = max(1, min(52, int(dt.isocalendar().week)))
+    clock = f"ZEAL {dt:%H:%M:%S} W{iso_week:02d}"
+    clock_segs: list[tuple[str, str]] = [(clock, "CYAN")]
+    room = width - len(clock) - 1
+    if room >= 12:
+        pct_val, secs = _fri_progress(dt)
+        rail = labeled_week_rail(ts, room, "FRI", pct_val, secs, "GREEN")
+        return pad_colored_segments([*clock_segs, (" ", "SYS"), *rail], width)
+    return pad_colored_segments(clock_segs, width)
 
 
 def top_status_line(now: float | None = None, width: int = WIDTH) -> str:
@@ -2341,17 +2374,11 @@ def mode_art(mode: str, now: float, width: int = WIDTH) -> list[str]:
         rows = list(RGB_BATTLE_FRAMES[int(anim_now(now, RGB_FRAME_SEC) // RGB_FRAME_SEC) % len(RGB_BATTLE_FRAMES)])
     else:
         rows = list(MODE_ART.get(mode, MODE_ART["lounge"]))
-    glint = "<>" if int(anim_now(now, 8.0) // 8) % 2 else "[]"
-    out: list[str] = []
-    for idx, row in enumerate(rows):
-        line = center(row, width)
-        if idx == 0 and len(line) >= 2:
-            chars = list(line)
-            chars[0] = glint[0]
-            chars[-1] = glint[1]
-            line = "".join(chars)
-        out.append(fit(line, width))
-    return out
+    # Block-center: one shared left margin so the whole ASCII box stays aligned.
+    # (pad, not fit -- fit() strips the leading spaces that do the centering.)
+    block_w = max((len(row) for row in rows), default=0)
+    left = max(0, (width - block_w) // 2)
+    return [pad(" " * left + row[:width], width) for row in rows]
 
 
 def transition_text(text: Any, now: float, row: int, width: int = WIDTH, window: float = 2.25) -> str:
@@ -3359,27 +3386,23 @@ def bridge_panel(bridge: dict[str, Any], width: int, now: float | None = None) -
 
 
 def lounge_panel(events: list[LcdEvent], width: int, now: float | None = None) -> list[tuple[DetailRow, str]]:
+    """IRC LOUNGE: the latest live chatter, colored per character, pinned to the bottom."""
     ts = time.time() if now is None else now
+    slots = LCD_PANEL_MAX_ROWS
     chosen = [
         event
         for event in events
-        if event.source in ("ZH", "ZP", "ST", "RPG", "PCORP", "IRC")
+        if event.source in ("ZH", "ZP", "ST", "RPG", "PCORP", "IRC", "GMQ")
         and event.kind not in ("presence", "status")
-    ][-3:]
-    lines: list[tuple[DetailRow, str]] = [
-        (detail_kv_header(width), "CYAN"),
-        (detail_kv_rule(width), "SYS"),
-    ]
+    ][-slots:]
+    rows: list[tuple[DetailRow, str]] = []
     for event in chosen:
-        for seg_row in event_display_rows(event, width, now=ts, max_body_lines=LCD_EVENT_MAX_BODY_LINES):
-            lines.append((seg_row, event_nick_style(event)))
-            if len(lines) >= 7:
-                break
-        if len(lines) >= 7:
-            break
-    while len(lines) < 7:
-        lines.append((pad("", width), "SYS"))
-    return lines[:7]
+        for seg_row in event_display_rows(event, width, now=ts, max_body_lines=2):
+            rows.append((seg_row, event_nick_style(event)))
+    rows = rows[-slots:]
+    # Bottom-pin: blank scrollback at top, freshest chatter near the panel floor.
+    pad_rows: list[tuple[DetailRow, str]] = [(pad("", width), "SYS")] * (slots - len(rows))
+    return (pad_rows + rows)[:slots]
 
 
 def render_text_frame(snapshot: dict[str, Any], now: float | None = None, tick: int = 0) -> list[str]:
