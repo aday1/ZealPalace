@@ -391,12 +391,10 @@ def _fri_progress(dt: datetime) -> tuple[float, int]:
 
 
 def _mon_progress(dt: datetime) -> tuple[float, int]:
-    """Progress + seconds toward Monday 10:00 (0% fill while still inside the work week)."""
-    _mon_10, fri_17, next_mon_10 = _weekly_milestones(dt)
+    """Progress + seconds toward Monday 10:00 across the whole week (always advancing)."""
+    mon_10, _fri_17, next_mon_10 = _weekly_milestones(dt)
     secs = max(0, int((next_mon_10 - dt).total_seconds()))
-    if work_week_phase(dt) == "weekend":
-        return _span_pct(fri_17, next_mon_10, dt), secs
-    return 0.0, secs
+    return _span_pct(mon_10, next_mon_10, dt), secs
 
 
 def labeled_week_rail(

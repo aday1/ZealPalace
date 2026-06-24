@@ -3924,7 +3924,7 @@ OMEN_PHRASES = (
     'stands cold', 'extinguished', 'western gate', 'celes keep', 'chilling shadow',
     'foreboding shadow', 'snuffed', 'darkness falls', 'watchtower',
 )
-OMEN_WINDOW_MAX = 2          # at most this many doom/omen lines per recent window
+OMEN_WINDOW_MAX = 1          # at most this many doom/omen lines per recent window
 _party_recent_lines: list[str] = []
 NPC_BLOG_STATE_FILE = NPC_DIR / 'blog_publish_state.json'
 BLOG_MIN_GAP_SEC = 7200       # 2h between posts per NPC
@@ -7329,9 +7329,23 @@ def default_player(nick, role='warrior', alignment='true_neutral', generation=0,
 def load_player(nick):
     f = RPG_DIR / f'{nick.lower()}.json'
     try:
-        return json.loads(f.read_text())
+        p = json.loads(f.read_text())
     except:
         return None
+    if not isinstance(p, dict):
+        return None
+    # Backfill keys missing from older/partial save files so the action tick
+    # never crashes on p['hp'] / p['age_ticks'] etc.
+    _player_defaults = {
+        'nick': nick, 'location': 'entrance',
+        'hp': 30, 'max_hp': 30, 'atk': 5, 'defense': 2,
+        'xp': 0, 'level': 1, 'alive': True, 'kills': 0,
+        'battles': 0, 'age_ticks': 0, 'generation': 0,
+        'inventory': [], 'history': [],
+    }
+    for _k, _v in _player_defaults.items():
+        p.setdefault(_k, _v)
+    return p
 
 def save_player(p):
     RPG_DIR.mkdir(parents=True, exist_ok=True)
