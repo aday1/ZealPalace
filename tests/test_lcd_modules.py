@@ -45,6 +45,9 @@ from zealot_lcd_render import (
     event_lines,
     event_segments,
     event_display_rows,
+    event_display_entries,
+    LcdTypewriter,
+    _segments_content_chars,
     fmt_age_short,
     fmt_duration_short,
     mesh_sync_alert_summary,
@@ -224,19 +227,36 @@ class LcdRenderTests(unittest.TestCase):
         self.assertIn("GRAY", act_styles)       # actions -> gray
         self.assertIn("EVT", realm_styles)      # realm/system -> light green
 
-    def test_event_red_end_of_line_dot(self):
+    def test_event_typewriter_cursor_on_complete_line(self):
         event = LcdEvent("ZP", "#RPG", "Yomiko", "lets raid the caves", sort_ts=1.0)
-        rows = event_display_rows(event, WIDTH, now=100.0, max_body_lines=4)
-        last = rows[-1]
-        reds = [t for t, s in last if s == "RED"]
-        self.assertIn(".", reds)
+        entries = event_display_entries(event, WIDTH, now=100.0, max_body_lines=4)
+        segments, line_key, eligible = entries[-1]
+        self.assertTrue(eligible)
+        tw = LcdTypewriter()
+        tw.prime([line_key], 100.0)
+        shown = tw.reveal(segments, line_key, 1099.0, WIDTH, cursor_eligible=True)
+        text = "".join(part for part, _style in shown).rstrip()
+        self.assertIn("caves", text)
+        styles = {s for _t, s in shown}
+        self.assertIn("CURSOR", styles)
 
-    def test_event_no_red_dot_when_truncated(self):
-        # A body too long for the budget must NOT get the red dot (signals "cut").
+    def test_event_no_cursor_when_truncated(self):
         event = LcdEvent("ZP", "#RPG", "Yomiko", "word " * 200, sort_ts=1.0)
-        rows = event_display_rows(event, WIDTH, now=100.0, max_body_lines=4)
-        reds = [t for row in rows for t, s in row if s == "RED"]
-        self.assertEqual(reds, [])
+        entries = event_display_entries(event, WIDTH, now=100.0, max_body_lines=4)
+        self.assertFalse(any(eligible for _seg, _key, eligible in entries))
+
+    def test_typewriter_types_progressively(self):
+        event = LcdEvent("ZP", "#RPG", "Yomiko", "hello mesh friends", sort_ts=1.0)
+        entries = event_display_entries(event, WIDTH, now=100.0, max_body_lines=4)
+        segments, line_key, eligible = entries[-1]
+        tw = LcdTypewriter()
+        tw._primed = True
+        tw._started[line_key] = 10.0
+        early = tw.reveal(segments, line_key, 10.2, WIDTH, cursor_eligible=eligible)
+        late = tw.reveal(segments, line_key, 12.0, WIDTH, cursor_eligible=eligible)
+        early_len = len(_segments_content_chars(early, WIDTH))
+        late_len = len(_segments_content_chars(late, WIDTH))
+        self.assertLess(early_len, late_len)
 
     def test_top_status_has_no_week_marker(self):
         from zealot_lcd_render import top_status_line

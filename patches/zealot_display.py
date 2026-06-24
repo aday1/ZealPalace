@@ -35,6 +35,9 @@ from zealot_lcd_render import (
     dashboard_footer_segments,
     event_segments,
     event_display_rows,
+    event_display_entries,
+    LcdTypewriter,
+    _segments_content_chars,
     event_lines,
     fit,
     lcd_status_line,
@@ -118,6 +121,7 @@ PAIR_IRC_MSG = 29    # white — message body
 
 _FRAME_W = WIDTH
 _FRAME_H = HEIGHT
+_EVENT_TYPEWRITER = LcdTypewriter()
 
 
 def begin_frame(stdscr) -> tuple[int, int]:
@@ -240,6 +244,7 @@ def attr_for(style: str, bold: bool = False, now: float | None = None, row: int 
         "IRC_NICK": PAIR_YELLOW,
         "GRAY": PAIR_DIM,
         "EVT": PAIR_GREEN,
+        "CURSOR": PAIR_IRC_MSG,
         "SCROLLER": PAIR_MOTD,
         "BANNER": PAIR_MAG,
         "RASTER": PAIR_BORDER,
@@ -249,8 +254,10 @@ def attr_for(style: str, bold: bool = False, now: float | None = None, row: int 
         attr |= curses.A_DIM
     if style in ("TITLE", "TAB_ON", "CYAN"):
         attr |= curses.A_BOLD
-    if style in ("MOTD", "GREETZ", "MOTIVE", "IRC_MSG"):
+    if style in ("MOTD", "GREETZ", "MOTIVE", "IRC_MSG", "CURSOR"):
         attr |= curses.A_BOLD
+    if style == "CURSOR":
+        attr |= curses.A_REVERSE
     if style in ("IRC_CHAN", "IRC_NICK", "ZP", "ZH", "RPG", "ST", "PBX", "NOC", "CYAN", "MAG", "RGB", "GREEN", "YELLOW", "RED", "TICK", "ART", "LOG", "GMQ", "EVT"):
         attr |= curses.A_BOLD
     if style == "MOTD_FX":
@@ -502,24 +509,36 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     # --- Demoscene FX strip: rotating greetz / tunnel bus / sparkle / raster ---
     add_line(stdscr, zones["fx_row"], demoscene_fx_row(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
 
-    # --- Events zone (reserved rows, tail-pinned, colored segments) ---
+    # --- Events zone (reserved rows, tail-pinned, typewriter chatter) ---
     add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
-    event_slot_rows: list[list[tuple[str, str]]] = []
+    event_draw_rows: list[tuple[list[tuple[str, str]], str, bool]] = []
     for event in snapshot.get("events") or []:
         if event_is_recurring_noise(event):
             continue
-        event_slot_rows.extend(
-            event_display_rows(event, frame_w, now=now, max_body_lines=LCD_EVENT_MAX_BODY_LINES)
+        event_draw_rows.extend(
+            event_display_entries(event, frame_w, now=now, max_body_lines=LCD_EVENT_MAX_BODY_LINES)
         )
     event_slots = max(1, zones["events_end"] - zones["events_start"])
-    event_slot_rows = event_slot_rows[-event_slots:]
-    # Bottom-pin chatter like a chat log: freshest line sits just above the input row.
-    start_row = zones["events_end"] - len(event_slot_rows)
-    for idx, segments in enumerate(event_slot_rows):
+    event_draw_rows = event_draw_rows[-event_slots:]
+    prep: list[tuple[str, int]] = []
+    for segments, line_key, _eligible in event_draw_rows:
+        prep.append((line_key, len(_segments_content_chars(segments, frame_w))))
+    active_keys = {key for key, _length in prep}
+    _EVENT_TYPEWRITER.prune(active_keys)
+    _EVENT_TYPEWRITER.prepare(prep, now)
+    start_row = zones["events_end"] - len(event_draw_rows)
+    for idx, (segments, line_key, cursor_eligible) in enumerate(event_draw_rows):
         row = start_row + idx
         if row < zones["events_start"] or row >= zones["events_end"]:
             continue
-        add_segment_line(stdscr, row, segments, now=now)
+        typed = _EVENT_TYPEWRITER.reveal(
+            segments,
+            line_key,
+            now,
+            frame_w,
+            cursor_eligible=cursor_eligible,
+        )
+        add_segment_line(stdscr, row, typed, now=now)
 
     if input_buf:
         input_text = fit("> " + input_buf[-(frame_w - 3) :], frame_w)
@@ -533,7 +552,7 @@ def main(stdscr) -> None:
     curses.curs_set(0)
     init_colors()
     stdscr.nodelay(True)
-    stdscr.timeout(350)
+    stdscr.timeout(120)
     drain_startup_keys(stdscr)
     try:
         stdscr.bkgd(" ", curses.color_pair(PAIR_DIM))
