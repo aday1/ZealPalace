@@ -16,7 +16,8 @@ never overlap. Constants live at the top of `zealot_lcd_render.py`:
     LCD_FX_ROWS           = 1
     LCD_EVENTS_HEADER_ROWS= 1
     LCD_EVENTS_MIN_ROWS   = 8
-    LCD_EVENT_MAX_BODY_LINES = 4
+    LCD_EVENT_MAX_BODY_LINES = 8
+    LCD_EVENT_OLD_MAX_LINES  = 2
 
 Resulting row map at 40x34:
 
@@ -88,12 +89,33 @@ Mode rotation `XTREE_MODES` cycles all eight every MODE_PERIOD_SEC.
 ## Live chatter (events + lounge)
 
 - EVENTS zone is bottom-pinned (newest line hugs the input row, scrollback above)
-  like a real IRC log. `event_display_rows` wraps up to LCD_EVENT_MAX_BODY_LINES,
-  full nicks (no truncation), no channel tags, age-only prefix `[1m]`.
-- Per-character color via `IRC_NICK_STYLES` (+ stable hash fallback through
-  `COMPANION_LINE_COLORS`). Nick and body share the character's hue.
+  like a real IRC log.
+- **One IRC source only:** live `IrcTap` when connected; else CELES log API; else
+  local `rpg.log` tail. Never merge tap + log (that duplicated every line).
+- **Dedupe:** identical text from any nick/source shows once; near-duplicate prose
+  collapsed in `dedupe_events`.
+- **No join spam:** `presence` / `join #` / `part #` events are filtered out of
+  EVENTS (`event_is_recurring_noise`).
+- **Wrap budget:** newest event gets up to `LCD_EVENT_MAX_BODY_LINES` (8) wrapped
+  rows; older events keep only `LCD_EVENT_OLD_MAX_LINES` (2) tail lines via
+  `compact_event_draw_rows` so long messages keep their continuations on screen.
+- **No dangling tails:** `_fit_event_body_lines` rejects incomplete last lines
+  (e.g. "battle against the") — backs up to a complete clause/sentence or drops
+  the fragment. Feed ingest uses `clip_sentence` capped at `LCD_EVENT_TEXT_CLIP`
+  (140 chars).
+- **Typewriter:** only the newest message/action types in character-by-character
+  (`LcdTypewriter`); prefix (age + kind badge + nick) appears instantly; body
+  types with a blinking block cursor; cursor disappears when the line is complete.
+- **Per-kind colors:** `event_msg_style` maps kind -> style (battle=RED, lore=ST,
+  travel=CYAN, weather/atmosphere=ART, talk=IRC_MSG white, action=GRAY). Typed
+  kinds show a colored badge in the prefix (e.g. `BATTLE `).
+- Per-character nick color via `IRC_NICK_STYLES` (+ hash fallback through
+  `COMPANION_LINE_COLORS`). Full nicks, no channel tags, age-only prefix `[1m]`.
 - `lounge_panel` fills all 7 panel rows with the freshest chatter, bottom-pinned,
   no header/rule waste.
+
+Current ticker stamp: check `LCD_TICKER_VERSION` in `zealot_lcd_render.py`
+(e.g. `tkr0624g`).
 
 ## Demoscene FX strip (row 16)
 
@@ -116,10 +138,16 @@ in both the `attr_for` pair map and the bold set.
 
 ## Deploy
 
-Copy `zealot_display.py` + `zealot_lcd_render.py` to the Pi `~/.local/bin/`, run
-`lcd-init`. Keep `patches/zealot_display.py` and `patches/zealot_lcd_render.py` in
-sync with the repo root - `patches/apply-on-zeal.sh` rsyncs them to the Pi and a
-stale copy will silently revert the layout.
+Copy `zealot_display.py`, `zealot_lcd_render.py`, and `zealot_lcd_feeds.py` to
+the Pi `~/.local/bin/`, run `lcd-init`. Keep `patches/zealot_display.py`,
+`patches/zealot_lcd_render.py`, and `patches/zealot_lcd_feeds.py` in **byte-identical**
+sync with the repo root — `tests/test_lcd_regression.py` enforces this.
+`patches/apply-on-zeal.sh` rsyncs them to the Pi; a stale copy silently reverts
+the layout.
+
+Before deploy on dev host:
+
+    python -m pytest tests/test_lcd_regression.py tests/test_lcd_modules.py -q
 
 Windows path: scp to CELES (10.13.37.37), then CELES scp to zeal (10.13.37.76);
 direct scp -J / ProxyJump from Windows tends to hang.
@@ -133,3 +161,8 @@ direct scp -J / ProxyJump from Windows tends to hang.
 - `lounge` dropped from `XTREE_MODES`; lounge_panel unreachable.
 - Full-screen SIP overlay disconnected from `draw()`.
 - `patches/` left stale so deploys reverted the live layout.
+- IRC tap + CELES log + local log merged (every line doubled).
+- All events typed at once (row of block cursors) instead of newest-only typewriter.
+- All realm/event kinds forced to one green `EVT` style (battle/lore/travel same color).
+- Long prose cut mid-phrase ("battle against the") with lost continuation rows.
+- `[now] join #channel` presence flood after every lcd-init reconnect.

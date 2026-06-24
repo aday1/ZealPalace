@@ -136,6 +136,7 @@ On Pi: copy tree to `/tmp/zeal_deploy`, run `deploy.sh`. LCD patches: `bash patc
 
 ## Test gates
 
+- `python -m pytest tests/test_lcd_regression.py tests/test_lcd_modules.py -q`
 - `systemctl is-active ngircd nginx zealot-bot zealot-rpg zealot-hangs zealot-web-api zealot-admin zealot-blog.timer`
 - `curl -s http://127.0.0.1/api/status`
 - IRC: `echo NICK t | nc -q1 127.0.0.1 6667 | head -3`
