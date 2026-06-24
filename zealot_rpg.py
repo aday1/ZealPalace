@@ -20,6 +20,19 @@ import urllib.request, urllib.error
 from pathlib import Path
 from datetime import datetime, date
 
+try:
+    from zealot_lcd_feeds import clip_sentence
+except ImportError:
+    def clip_sentence(value, limit=210):
+        text = re.sub(r'\s+', ' ', str(value or '')).strip()
+        if len(text) <= limit:
+            return text
+        window = text[:limit]
+        for idx in range(min(len(text), limit) - 1, -1, -1):
+            if text[idx] in '.!?':
+                return text[: idx + 1].strip()
+        return window.rsplit(' ', 1)[0].rstrip(' ,.;:-') or window
+
 OLLAMA = os.environ.get('OLLAMA_HOST', 'http://10.13.37.60:11434')
 GROK_API = os.environ.get('GROK_API_URL', 'https://api.x.ai/v1/chat/completions')
 GROK_API_KEY = os.environ.get('XAI_API_KEY') or os.environ.get('GROK_API_KEY', '')
@@ -4053,7 +4066,9 @@ def _cap_irc_line(text: str, limit: int = IRC_PARTY_MAX_CHARS) -> str:
     out = re.sub(r'\s+', ' ', str(text or '')).strip()
     if len(out) <= limit:
         return out
-    # Cut on a word boundary -- never mid-word, and no '...' truncation artifact.
+    clipped = clip_sentence(out, limit)
+    if clipped:
+        return clipped
     cut = out[:limit].rsplit(' ', 1)[0].rstrip(' ,.;:-')
     return cut or out[:limit]
 

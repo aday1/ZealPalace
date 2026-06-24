@@ -289,7 +289,25 @@ class LcdRenderTests(unittest.TestCase):
         self.assertNotRegex(joined, r"file system'?s?\s*$")
         self.assertNotRegex(joined, r"\bwhile the\s*$")
 
-    def test_presence_join_is_recurring_noise(self):
+    def test_fit_event_body_avoids_dangling_the(self):
+        from zealot_lcd_render import _fit_event_body_lines, _line_ends_complete_thought
+
+        body = (
+            "The party charges into battle against the corrupted sectors of the disk "
+            "arrays while packets splatter across the mesh like digital blood."
+        )
+        lines = _fit_event_body_lines(body, 28, 38, 4)
+        self.assertLessEqual(len(lines), 4)
+        self.assertTrue(_line_ends_complete_thought(lines[-1]))
+        self.assertNotRegex(lines[-1], r"\bthe\s*$")
+
+    def test_compact_event_draw_rows_keeps_newest(self):
+        from zealot_lcd_render import compact_event_draw_rows
+
+        row = lambda base, idx: ([], [("x", "IRC_MSG")], f"{base}|{idx}", base, 1.0, True)
+        rows = [row("old", 0), row("old", 1), row("new", 0), row("new", 1), row("new", 2)]
+        out = compact_event_draw_rows(rows, 4, "new", older_tail_lines=1)
+        self.assertEqual(sum(1 for r in out if r[3].startswith("new")), 3)
         event = LcdEvent("IRC", "#RPG", "lcd-ticker", "join #RPG", kind="presence", sort_ts=1.0)
         self.assertTrue(event_is_recurring_noise(event))
         from zealot_lcd_render import top_status_line

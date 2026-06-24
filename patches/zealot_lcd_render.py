@@ -57,6 +57,34 @@ LCD_FX_ROWS = 1
 LCD_EVENTS_HEADER_ROWS = 1
 LCD_EVENTS_MIN_ROWS = 8
 LCD_EVENT_MAX_BODY_LINES = 8
+LCD_EVENT_OLD_MAX_LINES = 2
+LCD_EVENT_DANGLING_WORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "against",
+        "to",
+        "of",
+        "in",
+        "on",
+        "at",
+        "for",
+        "and",
+        "or",
+        "but",
+        "with",
+        "from",
+        "into",
+        "onto",
+        "upon",
+        "over",
+        "under",
+        "about",
+        "as",
+        "by",
+    }
+)
 
 # Per-IRC-nick CGA color (Crystal Mesh party + terrarium NPCs).
 IRC_NICK_STYLES: dict[str, str] = {
@@ -121,7 +149,7 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0624f"
+LCD_TICKER_VERSION = "tkr0624g"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -2660,23 +2688,99 @@ def _wrap_event_body(
     return lines or [""]
 
 
+def _line_ends_complete_thought(text: str) -> bool:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean:
+        return False
+    if clean[-1] in ".!?":
+        return True
+    if clean[-1] in ",;:":
+        return True
+    last = clean.rsplit(" ", 1)[-1].lower().rstrip(".,!?;:")
+    return last not in LCD_EVENT_DANGLING_WORDS
+
+
 def _fit_event_body_lines(
     body: str,
     first_width: int,
     cont_width: int,
     max_lines: int,
 ) -> list[str]:
-    """Wrap body to max_lines; if overflow, clip at the last whole sentence that fits."""
+    """Wrap body to max_lines; never leave a dangling 'battle against the' tail line."""
     clean = re.sub(r"\s+", " ", str(body or "")).strip()
     if not clean:
         return [""]
     full = _wrap_event_body(clean, first_width, cont_width, 999)
     if len(full) <= max(1, max_lines):
         return full
+
     budget = max(first_width, first_width + cont_width * max(0, max_lines - 1))
-    clipped = clip_sentence(clean, budget)
-    lines = _wrap_event_body(clipped, first_width, cont_width, max(1, max_lines))
-    return lines[: max(1, max_lines)] or [""]
+    while budget >= first_width:
+        clipped = clip_sentence(clean, budget)
+        lines = _wrap_event_body(clipped, first_width, cont_width, max(1, max_lines))
+        if len(lines) <= max(1, max_lines) and _line_ends_complete_thought(lines[-1]):
+            return lines[: max(1, max_lines)]
+        budget = int(budget * 0.82)
+
+    for take in range(min(max_lines, len(full)), 0, -1):
+        lines = full[:take]
+        if _line_ends_complete_thought(lines[-1]):
+            return lines
+
+    one = clip_sentence(clean, first_width)
+    return _wrap_event_body(one, first_width, cont_width, 1)[:1] or [""]
+
+
+EventDrawRow = tuple[
+    list[tuple[str, str]],
+    list[tuple[str, str]],
+    str,
+    str,
+    float,
+    bool,
+]
+
+
+def compact_event_draw_rows(
+    rows: list[EventDrawRow],
+    slots: int,
+    newest_base: str,
+    *,
+    older_tail_lines: int = LCD_EVENT_OLD_MAX_LINES,
+) -> list[EventDrawRow]:
+    """Keep the newest event intact; trim older chatter to tail lines so wraps are not lost."""
+    if len(rows) <= slots or not newest_base:
+        return rows[-slots:]
+    grouped: dict[str, list[EventDrawRow]] = {}
+    order: list[str] = []
+    for row in rows:
+        base = row[3]
+        if base not in grouped:
+            grouped[base] = []
+            order.append(base)
+        grouped[base].append(row)
+    compact: list[EventDrawRow] = []
+    for base in order:
+        chunk = grouped[base]
+        if base == newest_base:
+            compact.extend(chunk)
+        else:
+            compact.extend(chunk[-max(1, older_tail_lines) :])
+    if len(compact) <= slots:
+        return compact
+    newest_rows = grouped.get(newest_base, [])
+    if len(newest_rows) >= slots:
+        return newest_rows[-slots:]
+    budget = slots - len(newest_rows)
+    trimmed: list[EventDrawRow] = []
+    for base in order:
+        if base == newest_base:
+            continue
+        for row in grouped[base][-max(1, older_tail_lines) :]:
+            if len(trimmed) >= budget:
+                break
+            trimmed.append(row)
+    return trimmed + newest_rows
 
 
 def _event_nick_label(event: LcdEvent) -> str:

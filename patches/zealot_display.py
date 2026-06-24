@@ -19,6 +19,7 @@ from zealot_lcd_render import (
     WIDTH,
     LCD_PANEL_MAX_ROWS,
     LCD_EVENT_MAX_BODY_LINES,
+    LCD_EVENT_OLD_MAX_LINES,
     SCROLLER_SPEED,
     TICKER_SCROLLER_SPEED,
     lcd_frame_cols,
@@ -36,6 +37,8 @@ from zealot_lcd_render import (
     event_segments,
     event_display_rows,
     event_display_entries,
+    compact_event_draw_rows,
+    _event_body_key,
     LcdTypewriter,
     _segments_content_chars,
     event_lines,
@@ -511,21 +514,30 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
 
     # --- Events zone (reserved rows, tail-pinned, typewriter on newest line only) ---
     add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
-    event_draw_rows: list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]] = []
-    for event in snapshot.get("events") or []:
-        if event_is_recurring_noise(event):
-            continue
-        event_draw_rows.extend(
-            event_display_entries(event, frame_w, now=now, max_body_lines=LCD_EVENT_MAX_BODY_LINES)
-        )
-    event_slots = max(1, zones["events_end"] - zones["events_start"])
-    event_draw_rows = event_draw_rows[-event_slots:]
+    raw_events = [
+        event
+        for event in (snapshot.get("events") or [])
+        if not event_is_recurring_noise(event)
+    ]
     newest_base = ""
     newest_ts = -1.0
-    for _prefix, _body, _key, event_base, sort_ts, typeable in event_draw_rows:
-        if typeable and sort_ts >= newest_ts:
-            newest_ts = sort_ts
-            newest_base = event_base
+    for event in raw_events:
+        ts = float(event.sort_ts or 0.0)
+        if ts >= newest_ts:
+            newest_ts = ts
+            newest_base = _event_body_key(event)
+    event_draw_rows: list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]] = []
+    for event in raw_events:
+        max_lines = (
+            LCD_EVENT_MAX_BODY_LINES
+            if _event_body_key(event) == newest_base
+            else LCD_EVENT_OLD_MAX_LINES
+        )
+        event_draw_rows.extend(
+            event_display_entries(event, frame_w, now=now, max_body_lines=max_lines)
+        )
+    event_slots = max(1, zones["events_end"] - zones["events_start"])
+    event_draw_rows = compact_event_draw_rows(event_draw_rows, event_slots, newest_base)
     prep: list[tuple[str, int]] = []
     for prefix, body, line_key, event_base, _sort_ts, typeable in event_draw_rows:
         if typeable and event_base == newest_base:
