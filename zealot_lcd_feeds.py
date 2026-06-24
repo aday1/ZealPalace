@@ -114,6 +114,15 @@ def short_text(value: Any, limit: int = 120) -> str:
     return text[: max(1, limit - 3)].rstrip() + "..."
 
 
+def clip_words(value: Any, limit: int = 200) -> str:
+    """Length cap on a word boundary -- no '...' truncation artifact."""
+    text = re.sub(r"\s+", " ", re.sub(r"[\r\n\t]+", " ", str(value or ""))).strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return cut or text[:limit]
+
+
 def parse_iso_ts(value: str) -> float:
     if not value:
         return 0.0
@@ -662,7 +671,7 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
             )
         ]
 
-    for idx, row in enumerate(snapshot.get("lore_recent", [])[-2:]):
+    for idx, row in enumerate(snapshot.get("lore_recent", [])[-1:]):
         if not isinstance(row, dict):
             continue
         ts = str(row.get("ts") or row.get("created_at") or "")
@@ -670,8 +679,8 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
             LcdEvent(
                 source="ST",
                 channel="bridge:lore",
-                nick=short_text(row.get("character") or row.get("topic") or "lore", 24),
-                text=short_text(row.get("text"), 240),
+                nick="lore",
+                text=clip_words(row.get("text"), 200),
                 kind="lore",
                 canon="sillytavern",
                 ts=ts,
@@ -683,7 +692,7 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
     bridge = snapshot.get("bridge") or {}
     raw_events = bridge.get("events", []) if isinstance(bridge, dict) else []
     if isinstance(raw_events, list):
-        for idx, row in enumerate(raw_events[-2:]):
+        for idx, row in enumerate(raw_events[-1:]):
             if not isinstance(row, dict):
                 continue
             ts = str(row.get("ts") or "")
@@ -697,8 +706,8 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
                 LcdEvent(
                     source="ST",
                     channel="bridge:event",
-                    nick=short_text(actor, 24),
-                    text=short_text(text, 220),
+                    nick="bridge",
+                    text=clip_words(text, 200),
                     kind=str(row.get("kind") or "bridge"),
                     canon="sillytavern",
                     ts=ts,
@@ -707,7 +716,7 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
                 )
             )
 
-    for idx, row in enumerate(snapshot.get("gm_pending", [])[-4:]):
+    for idx, row in enumerate(snapshot.get("gm_pending", [])[-2:]):
         if not isinstance(row, dict):
             continue
         ts = str(row.get("ts") or row.get("created_at") or "")
@@ -715,8 +724,8 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
             LcdEvent(
                 source="GMQ",
                 channel="#RPG",
-                nick=short_text(row.get("action") or "gm", 24),
-                text=short_text(row.get("message") or row.get("target") or row, 220),
+                nick="gm",
+                text=clip_words(row.get("message") or row.get("target") or row, 200),
                 kind="gm_queue",
                 canon="queued",
                 ts=ts,

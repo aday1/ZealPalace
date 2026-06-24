@@ -56,7 +56,7 @@ LCD_MID_FOOTER_ROWS = 2
 LCD_FX_ROWS = 1
 LCD_EVENTS_HEADER_ROWS = 1
 LCD_EVENTS_MIN_ROWS = 8
-LCD_EVENT_MAX_BODY_LINES = 4
+LCD_EVENT_MAX_BODY_LINES = 6
 
 # Per-IRC-nick CGA color (Crystal Mesh party + terrarium NPCs).
 IRC_NICK_STYLES: dict[str, str] = {
