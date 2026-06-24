@@ -2717,12 +2717,18 @@ def event_display_rows(
     first_room = max(1, width - prefix_len)
     body_lines = _wrap_event_body(body, first_room, width, max(1, max_body_lines))
 
+    # A real IRC line (someone actually spoke/acted) gets a RED end-of-line dot
+    # so a complete sentence is unmistakable from a truncated one.
+    real_line = bool(nick) and event.kind in ("message", "action")
+    last_idx = len(body_lines) - 1
     rows: list[list[tuple[str, str]]] = []
     for idx, chunk in enumerate(body_lines):
         if idx == 0:
             segments = [*meta, *nick_segments, (chunk, msg_style)]
         else:
             segments = [(chunk, msg_style)]
+        if real_line and idx == last_idx:
+            segments.append((".", "RED"))
         rows.append(pad_colored_segments(segments, width))
     if not rows:
         rows.append(pad_colored_segments([*meta, *nick_segments], width))

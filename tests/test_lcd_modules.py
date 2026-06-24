@@ -213,6 +213,30 @@ class LcdRenderTests(unittest.TestCase):
         self.assertIn("[" + nick + "]", text)
         self.assertNotIn("...", text)
 
+    def test_event_body_color_by_type(self):
+        talk = LcdEvent("ZP", "#RPG", "Yomiko", "hello friends", sort_ts=1.0)
+        action = LcdEvent("RPG", "#RPG", "Hex", "wanders the spire", kind="action", sort_ts=1.0)
+        realm = LcdEvent("ST", "bridge", "CrystalMesh", "realm pulse rolls in", canon="bridge", sort_ts=1.0)
+        talk_styles = {s for _t, s in event_segments(talk, WIDTH, now=100.0)}
+        act_styles = {s for _t, s in event_segments(action, WIDTH, now=100.0)}
+        realm_styles = {s for _t, s in event_segments(realm, WIDTH, now=100.0)}
+        self.assertIn("IRC_MSG", talk_styles)   # talking -> white
+        self.assertIn("GRAY", act_styles)       # actions -> gray
+        self.assertIn("EVT", realm_styles)      # realm/system -> light green
+
+    def test_event_red_end_of_line_dot(self):
+        event = LcdEvent("ZP", "#RPG", "Yomiko", "lets raid the caves", sort_ts=1.0)
+        rows = event_display_rows(event, WIDTH, now=100.0, max_body_lines=4)
+        last = rows[-1]
+        reds = [t for t, s in last if s == "RED"]
+        self.assertIn(".", reds)
+
+    def test_top_status_has_no_week_marker(self):
+        from zealot_lcd_render import top_status_line
+        row = top_status_line(datetime(2026, 6, 24, 13, 21).timestamp(), WIDTH)
+        self.assertIn("ZEAL", row)
+        self.assertNotRegex(row, r"W\d{2}")  # week lives only on the calendar row
+
     def test_uptime_slide_fits_width(self):
         snapshot = {
             "status": {

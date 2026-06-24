@@ -115,14 +115,14 @@ def _build_status(
         right = f"#[fg=green]{host} {ip} #[fg=yellow]{TMUX_TIME_FMT}"
         return left, right
 
-    # Bottom physical row: LCD version + last-deploy stamp on the left, IP +
-    # live 12h clock on the right. (Mesh status stays on the curses line above.)
+    # Bottom physical row: LCD version + last-deploy stamp (left), IP + host (right).
+    # No live clock here -- the top ZEAL row already shows the time (don't state it twice).
     if tmux_status_segments is not None and snapshot is not None:
         _plain_left, plain_ip = tmux_status_segments(snapshot, mode)
         ip = plain_ip or ip
     ver, dep = _build_stamp()
-    left = f"#[fg=yellow,bold]{ver}#[default] #[fg=cyan]{dep}#[default]"
-    right = f"#[fg=green]{ip}#[fg=yellow] {TMUX_TIME_FMT}"
+    left = f"#[fg=yellow,bold]{ver}#[default] #[fg=cyan]dep {dep}#[default]"
+    right = f"#[fg=green]{ip} #[fg=cyan]{host}#[default]"
     return left, right
 
 

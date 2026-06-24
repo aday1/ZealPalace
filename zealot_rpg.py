@@ -3904,9 +3904,9 @@ NPC_TICK_INTERVAL = 180  # 3 minutes — unhurried world
 NPC_REACT_CHANCE = 0.6
 
 # Party chat / peer RP — want visible bot-to-bot conversation without doom spam
-PARTY_MIN_GAP = 55           # min seconds between any party line on #RPG
+PARTY_MIN_GAP = 38           # min seconds between any party line on #RPG
 PARTY_BURST_WINDOW = 600     # rolling window (10 min)
-PARTY_BURST_MAX = 7          # max party lines per window
+PARTY_BURST_MAX = 12         # max party lines per window -- lively casual chatter
 PARTY_NICK_COOLDOWN = 200    # per-NPC cooldown before another @reply
 PARTY_PEER_CHECK_INTERVAL = 20   # consider peer replies this often
 PARTY_PEER_ATTEMPT_CHANCE = 0.35   # when gate open, attempt a reply more often
@@ -5287,10 +5287,10 @@ class NPCManager:
         else:  # warrior / fallback
             action_prompt += 'WANDER, FIGHT, OBSERVE, SOCIALIZE, PRAY, BUILD, ATTEND_TAVERN. '
         others = [n for n in self.conns if n != name and (load_player(self.conns[n].nick) or {}).get('location') == p.get('location')]
-        if others and random.random() < 0.2:
+        if others:
             action_prompt += (
-                f'Others here: {", ".join(self.conns[n].nick for n in others[:4])}. '
-                f'SOCIALIZE only if you have something brief worth saying. '
+                f'Party nearby: {", ".join(self.conns[n].nick for n in others[:4])}. '
+                f'Prefer SOCIALIZE -- swap casual adventure talk, quests, loot, banter. '
             )
         action_prompt += 'Reply with just the action word.'
 
@@ -5310,6 +5310,10 @@ class NPCManager:
                          'DIVINE', 'PROPHECY', 'BUILD'}
                 if choice in valid:
                     action_choice = choice
+
+        # Bias toward lively casual party banter when companions are nearby.
+        if others and action_choice in ('WANDER', 'OBSERVE') and self._party_chat_allowed(time.time(), nick=name) and random.random() < 0.5:
+            action_choice = 'SOCIALIZE'
 
         # ── Role override: pacifists never fight ──
         if action_choice == 'FIGHT' and not role_info['can_fight']:
@@ -6454,19 +6458,21 @@ h1{{color:#00ffcc;font-size:14px;border-bottom:1px solid #00ffcc33;padding-botto
 
         if compat > 0:
             prompt = (
-                f'{mem_ctx}You meet {oirc.nick} (a {op.get("role","warrior")}) at {loc["name"]}. '
-                f'You get along. Chat warmly in character. 1 SHORT sentence.'
+                f'{mem_ctx}You are hanging out with {oirc.nick} (a {op.get("role","warrior")}) at {loc["name"]}. '
+                f'Make casual, fun adventure small-talk -- quests, loot, the realm, a joke, plans. '
+                f'Warm and playful, in character. 1 SHORT casual sentence (max 14 words).'
             )
         elif compat < 0:
             prompt = (
-                f'{mem_ctx}You meet {oirc.nick} at {loc["name"]}. '
-                f'Your alignments clash ({ALIGNMENT_DISPLAY.get(my_align)} vs {ALIGNMENT_DISPLAY.get(their_align)}). '
-                f'Respond with tension in character. 1 SHORT sentence.'
+                f'{mem_ctx}You bump into {oirc.nick} at {loc["name"]}. '
+                f'You two needle each other ({ALIGNMENT_DISPLAY.get(my_align)} vs {ALIGNMENT_DISPLAY.get(their_align)}) '
+                f'but it is banter, not a fight. 1 SHORT cheeky sentence (max 14 words).'
             )
         else:
             prompt = (
-                f'{mem_ctx}You meet {oirc.nick} at {loc["name"]}. '
-                f'Brief neutral interaction in character. 1 SHORT sentence.'
+                f'{mem_ctx}You chat with {oirc.nick} at {loc["name"]}. '
+                f'Casual adventure banter -- ask about their day, a quest, or share a quip. '
+                f'1 SHORT casual sentence (max 14 words).'
             )
 
         persona = dict(persona)
