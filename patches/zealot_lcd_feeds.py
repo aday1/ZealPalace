@@ -123,6 +123,20 @@ def clip_words(value: Any, limit: int = 200) -> str:
     return cut or text[:limit]
 
 
+def clip_sentence(value: Any, limit: int = 210) -> str:
+    """Keep whole sentences. Over the limit, end on the last . ! ? so the line
+    reads complete (never a mid-sentence chop); fall back to a word boundary."""
+    text = re.sub(r"\s+", " ", re.sub(r"[\r\n\t]+", " ", str(value or ""))).strip()
+    if len(text) <= limit:
+        return text
+    window = text[:limit]
+    ends = list(re.finditer(r"[.!?]", window))
+    if ends:
+        return window[: ends[-1].end()].strip()
+    cut = window.rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return cut or window
+
+
 def parse_iso_ts(value: str) -> float:
     if not value:
         return 0.0
@@ -680,7 +694,7 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
                 source="ST",
                 channel="bridge:lore",
                 nick="lore",
-                text=clip_words(row.get("text"), 200),
+                text=clip_sentence(row.get("text"), 210),
                 kind="lore",
                 canon="sillytavern",
                 ts=ts,
@@ -707,7 +721,7 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
                     source="ST",
                     channel="bridge:event",
                     nick="bridge",
-                    text=clip_words(text, 200),
+                    text=clip_sentence(text, 210),
                     kind=str(row.get("kind") or "bridge"),
                     canon="sillytavern",
                     ts=ts,
@@ -725,7 +739,7 @@ def bridge_events(snapshot: dict[str, Any], limit: int = 16) -> list[LcdEvent]:
                 source="GMQ",
                 channel="#RPG",
                 nick="gm",
-                text=clip_words(row.get("message") or row.get("target") or row, 200),
+                text=clip_sentence(row.get("message") or row.get("target") or row, 210),
                 kind="gm_queue",
                 canon="queued",
                 ts=ts,
@@ -857,7 +871,7 @@ def parse_irc_protocol_line(line: str) -> LcdEvent | None:
             source=source,
             channel=chan,
             nick=short_text(nick, 24),
-            text=short_text(msg, 260),
+            text=clip_sentence(msg, 210),
             kind=kind,
             canon="irc",
             ts=now_iso(),

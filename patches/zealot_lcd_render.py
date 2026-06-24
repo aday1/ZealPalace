@@ -2714,14 +2714,19 @@ def event_display_rows(
     if nick and event.kind in ("message", "action"):
         nick_segments = [("[", nick_style), (nick, nick_style), ("] ", nick_style)]
 
-    # A real IRC line (someone actually spoke/acted) gets a RED end-of-line dot
-    # so a complete sentence is unmistakable from a truncated one. Reserve one
-    # column for it so a full-width last line never truncates the dot away.
-    real_line = bool(nick) and event.kind in ("message", "action")
-    dot_reserve = 1 if real_line else 0
+    # A content line gets a RED end-of-line dot ONLY when the whole text fit.
+    # No dot therefore honestly signals "there is more -- this line was cut".
+    # Reserve one column so a full-width last line never trims the dot away.
+    dot_eligible = bool(body) and event.kind not in ("presence", "status")
+    dot_reserve = 1 if dot_eligible else 0
     prefix_len = sum(len(text) for text, _style in meta + nick_segments)
     first_room = max(1, width - prefix_len - dot_reserve)
-    body_lines = _wrap_event_body(body, first_room, max(1, width - dot_reserve), max(1, max_body_lines))
+    cont_room = max(1, width - dot_reserve)
+    full_lines = _wrap_event_body(body, first_room, cont_room, 999)
+    max_lines = max(1, max_body_lines)
+    truncated = len(full_lines) > max_lines
+    body_lines = full_lines[:max_lines]
+    show_dot = dot_eligible and not truncated
 
     last_idx = len(body_lines) - 1
     rows: list[list[tuple[str, str]]] = []
@@ -2730,7 +2735,7 @@ def event_display_rows(
             segments = [*meta, *nick_segments, (chunk, msg_style)]
         else:
             segments = [(chunk, msg_style)]
-        if real_line and idx == last_idx:
+        if show_dot and idx == last_idx:
             segments.append((".", "RED"))
         rows.append(pad_colored_segments(segments, width))
     if not rows:

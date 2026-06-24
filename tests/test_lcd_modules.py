@@ -231,6 +231,13 @@ class LcdRenderTests(unittest.TestCase):
         reds = [t for t, s in last if s == "RED"]
         self.assertIn(".", reds)
 
+    def test_event_no_red_dot_when_truncated(self):
+        # A body too long for the budget must NOT get the red dot (signals "cut").
+        event = LcdEvent("ZP", "#RPG", "Yomiko", "word " * 200, sort_ts=1.0)
+        rows = event_display_rows(event, WIDTH, now=100.0, max_body_lines=4)
+        reds = [t for row in rows for t, s in row if s == "RED"]
+        self.assertEqual(reds, [])
+
     def test_top_status_has_no_week_marker(self):
         from zealot_lcd_render import top_status_line
         row = top_status_line(datetime(2026, 6, 24, 13, 21).timestamp(), WIDTH)
