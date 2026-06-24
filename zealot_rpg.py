@@ -3903,19 +3903,28 @@ NPC_TICK_INTERVAL = 180  # 3 minutes — unhurried world
 # Chance an NPC reacts when a human does something in the same room
 NPC_REACT_CHANCE = 0.6
 
-# Party chat / peer RP — less is more; keep #RPG readable on the LCD
-PARTY_MIN_GAP = 90           # min seconds between any party line on #RPG
+# Party chat / peer RP — want visible bot-to-bot conversation without doom spam
+PARTY_MIN_GAP = 55           # min seconds between any party line on #RPG
 PARTY_BURST_WINDOW = 600     # rolling window (10 min)
-PARTY_BURST_MAX = 4          # max party lines per window (small bursts)
-PARTY_NICK_COOLDOWN = 300    # per-NPC cooldown before another @reply
-PARTY_PEER_CHECK_INTERVAL = 25   # only consider peer replies this often
-PARTY_PEER_ATTEMPT_CHANCE = 0.18   # when gate open, still usually skip
+PARTY_BURST_MAX = 7          # max party lines per window
+PARTY_NICK_COOLDOWN = 200    # per-NPC cooldown before another @reply
+PARTY_PEER_CHECK_INTERVAL = 20   # consider peer replies this often
+PARTY_PEER_ATTEMPT_CHANCE = 0.35   # when gate open, attempt a reply more often
 IRC_PARTY_MAX_CHARS = 88       # fits ~2 LCD rows (40 cols minus nick prefix)
 PARTY_RECENT_MAX = 40
 HOMELAB_LOOP_KEYWORDS = (
     'jellyfin', 'steamdeck', 'steam deck', 'zealtower', 'navidrome',
     'immich', 'syncthing', 'pihole', 'tailscale', 'meshcentral',
+    'noteair', 'boox', 'linode', 'nifelheim', 'steam deck',
 )
+# Formulaic "a host went dark" omen narration -- cap how much of it floods #RPG.
+OMEN_PHRASES = (
+    'cold and silent', 'watchfire', 'no torch', 'gone dark', 'goes dark',
+    'casting a shadow', 'casting a somber', 'somber shadow', 'silence from',
+    'stands cold', 'extinguished', 'western gate', 'celes keep', 'chilling shadow',
+    'foreboding shadow', 'snuffed', 'darkness falls', 'watchtower',
+)
+OMEN_WINDOW_MAX = 2          # at most this many doom/omen lines per recent window
 _party_recent_lines: list[str] = []
 NPC_BLOG_STATE_FILE = NPC_DIR / 'blog_publish_state.json'
 BLOG_MIN_GAP_SEC = 7200       # 2h between posts per NPC
@@ -4013,11 +4022,17 @@ def _party_line_is_repetitive(nick: str, text: str) -> bool:
             return True
         if len(norm) > 24 and (norm in prev_body or prev_body in norm):
             return True
+    # One mention per homelab host per window -- no "everyone narrates the same outage".
     for kw in HOMELAB_LOOP_KEYWORDS:
-        if kw in norm:
-            hits = sum(1 for row in _party_recent_lines[-18:] if kw in row)
-            if hits >= 2:
-                return True
+        if kw in norm and any(kw in row for row in _party_recent_lines[-18:]):
+            return True
+    # Cap formulaic doom narration regardless of which host it names.
+    if any(p in norm for p in OMEN_PHRASES):
+        omen_hits = sum(
+            1 for row in _party_recent_lines[-18:] if any(p in row for p in OMEN_PHRASES)
+        )
+        if omen_hits >= OMEN_WINDOW_MAX:
+            return True
     return False
 
 
@@ -4718,10 +4733,16 @@ class NPCIRC:
         self._tx(f'JOIN {CHANNEL}')
 
     def say(self, msg):
+        if _party_line_is_repetitive(self.nick, msg):
+            return
+        _party_recent_push(self.nick, msg)
         for chunk in [msg[i:i+400] for i in range(0, len(msg), 400)]:
             self._tx(f'PRIVMSG {CHANNEL} :{chunk}')
 
     def act(self, msg):
+        if _party_line_is_repetitive(self.nick, msg):
+            return
+        _party_recent_push(self.nick, msg)
         for chunk in [msg[i:i+450] for i in range(0, len(msg), 450)]:
             self._tx(f'PRIVMSG {CHANNEL} :\x01ACTION {chunk}\x01')
 
@@ -4865,8 +4886,8 @@ def npc_gen(prompt, persona, maxn=55, other_nick=None):
         txt = _llm_grok(prompt, system, maxn=maxn)
     if txt and nick and _party_line_is_repetitive(nick, txt):
         return None
-    if txt:
-        _party_recent_push(nick or 'npc', txt)
+    # Push happens at the say()/act() chokepoint so the dedup window tracks the
+    # exact lines that hit IRC (decorated with prefixes), not the raw generation.
     return txt
 
 
@@ -7113,6 +7134,9 @@ class IRC:
         self._tx(f'JOIN {CHANNEL}')
 
     def say(self, msg):
+        if _party_line_is_repetitive('dm', msg):
+            return
+        _party_recent_push('dm', msg)
         for chunk in [msg[i:i+400] for i in range(0, len(msg), 400)]:
             self._tx(f'PRIVMSG {CHANNEL} :{chunk}')
 
