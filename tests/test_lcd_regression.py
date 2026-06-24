@@ -85,12 +85,14 @@ class LcdRegressionContract(unittest.TestCase):
         self.assertTrue(event_is_recurring_noise(join))
 
     def test_per_kind_event_colors_differ(self):
+        from zealot_lcd_render import event_body_style, event_msg_style
+
         battle = event_msg_style(LcdEvent("ST", "x", "b", "fight", kind="battle", sort_ts=1.0))
         lore = event_msg_style(LcdEvent("ST", "x", "l", "text", kind="lore", sort_ts=1.0))
-        talk = event_msg_style(LcdEvent("ZP", "#RPG", "Yomiko", "hi", kind="message", sort_ts=1.0))
+        talk = event_body_style(LcdEvent("ZP", "#RPG", "Yomiko", "hi", kind="message", sort_ts=1.0))
         self.assertEqual(battle, "RED")
         self.assertEqual(lore, "ST")
-        self.assertEqual(talk, "IRC_MSG")
+        self.assertEqual(talk, "MAG")
         self.assertNotEqual(battle, lore)
 
     def test_no_dangling_battle_against_the(self):

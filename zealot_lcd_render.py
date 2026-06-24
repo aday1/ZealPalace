@@ -144,6 +144,13 @@ IRC_NICK_STYLES: dict[str, str] = {
     "dm": "PBX",
     "rift": "CYAN",
     "hex": "RGB",
+    "dungeonmaster": "PBX",
+    "zapcore": "TICK",
+    "frostbite": "CYAN",
+    "darkbyte": "RED",
+    "xx_darkbyte_xx": "RED",
+    "bellona": "PBX",
+    "aday": "LOG",
 }
 
 
@@ -174,7 +181,7 @@ SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
 FOOTER_SCROLLER_SPEED = 0.35
 FOOTER_FRAME_PERIOD_SEC = 15.0
-LCD_TICKER_VERSION = "tkr0624q"
+LCD_TICKER_VERSION = "tkr0624r"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -3128,6 +3135,36 @@ def event_nick_style(event: LcdEvent) -> str:
     }.get(event.source, "IRC_NICK")
 
 
+_KNOWN_SPEAKER_NICKS: tuple[str, ...] = tuple(
+    sorted(IRC_NICK_STYLES.keys(), key=len, reverse=True)
+)
+
+
+def _speaker_nick_in_body(body: str) -> str:
+    text = re.sub(r"\s+", " ", str(body or "")).strip().lower()
+    if not text:
+        return ""
+    for nick in _KNOWN_SPEAKER_NICKS:
+        if re.search(rf"\b{re.escape(nick)}\b", text):
+            return nick
+    return ""
+
+
+def event_body_style(event: LcdEvent) -> str:
+    """Message body color — match the speaking character when we know who it is."""
+    kind = str(event.kind or "message").lower()
+    nick = _event_nick_label(event).lower().rstrip("_")
+    if kind in ("message", "action") and nick:
+        return event_nick_style(event)
+    if kind == "spawn":
+        subject = _speaker_nick_in_body(event.text or "")
+        if subject:
+            return IRC_NICK_STYLES.get(subject, event_nick_style(event))
+    if kind in ("presence", "status") and nick:
+        return event_nick_style(event)
+    return event_msg_style(event)
+
+
 def event_display_rows(
     event: LcdEvent,
     width: int = WIDTH,
@@ -3144,7 +3181,7 @@ def event_display_rows(
 
     meta = event_prefix_segments(event, now_ts, width)
     nick_segments: list[tuple[str, str]] = []
-    msg_style = event_msg_style(event)
+    msg_style = event_body_style(event)
     # Bracketed bright nick ONLY for real chatter (someone speaking/acting).
     # Lore/GM/bridge/status events are narration, not a speaker -- no fake nick.
     if nick and event.kind in ("message", "action"):
@@ -3264,7 +3301,7 @@ def event_display_entries(
 
     meta = event_prefix_segments(event, now_ts, width)
     nick_segments: list[tuple[str, str]] = []
-    msg_style = event_msg_style(event)
+    msg_style = event_body_style(event)
     if nick and event.kind in ("message", "action"):
         nick_segments = [("[", nick_style), (nick, nick_style), ("] ", nick_style)]
 

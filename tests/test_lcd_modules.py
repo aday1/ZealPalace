@@ -233,7 +233,7 @@ class LcdRenderTests(unittest.TestCase):
         text = "".join(part for part, _style in segments)
         self.assertIn("IRC_TIME", styles)
         self.assertIn("ZP", styles)
-        self.assertIn("IRC_MSG", styles)
+        self.assertIn("ZP", {s for t, s in segments if t.strip() and t not in "[Zealot]"})
         self.assertIn("[1m]", text)
         self.assertNotRegex(text, r"\[\d{2}:\d{2}\]")
         self.assertIn("[Zealot]", text)
@@ -264,10 +264,23 @@ class LcdRenderTests(unittest.TestCase):
         act_styles = {s for _t, s in event_segments(action, WIDTH, now=100.0)}
         lore_styles = {s for _t, s in event_segments(lore, WIDTH, now=100.0)}
         battle_styles = {s for _t, s in event_segments(battle, WIDTH, now=100.0)}
-        self.assertIn("IRC_MSG", talk_styles)
-        self.assertIn("GRAY", act_styles)
+        self.assertIn("MAG", talk_styles)
+        self.assertIn("RGB", act_styles)
         self.assertIn("ST", lore_styles)
         self.assertIn("RED", battle_styles)
+
+    def test_spawn_body_uses_subject_character_color(self):
+        from zealot_lcd_render import event_body_style
+
+        spawn = LcdEvent(
+            "RPG",
+            "#RPG",
+            "DungeonMaster",
+            "░▒▓ Yomiko materializes at Hall of Processes!",
+            kind="spawn",
+            sort_ts=1.0,
+        )
+        self.assertEqual(event_body_style(spawn), "MAG")
 
     def test_dedupe_same_text_any_source(self):
         a = LcdEvent("RPG", "#RPG", "DM", "The realms atmosphere shifts today", sort_ts=1.0)
@@ -289,7 +302,7 @@ class LcdRenderTests(unittest.TestCase):
         self.assertIn("CURSOR", styles)
         self.assertIn("[", text)
         body_text = "".join(t for t, _s in body)
-        shown_body = "".join(t for t, s in mid if s == "IRC_MSG")
+        shown_body = "".join(t for t, s in mid if s == "MAG")
         self.assertLess(len(shown_body), len(body_text))
 
     def test_event_typewriter_no_cursor_when_done(self):
@@ -312,8 +325,8 @@ class LcdRenderTests(unittest.TestCase):
         tw._started[line_key] = 10.0
         early = tw.reveal(prefix, body, line_key, 10.3, WIDTH, animate=True)
         late = tw.reveal(prefix, body, line_key, 12.0, WIDTH, animate=True)
-        early_body = "".join(t for t, s in early if s == "IRC_MSG")
-        late_body = "".join(t for t, s in late if s == "IRC_MSG")
+        early_body = "".join(t for t, s in early if s == "MAG")
+        late_body = "".join(t for t, s in late if s == "MAG")
         self.assertLess(len(early_body), len(late_body))
 
     def test_event_body_clips_at_sentence_when_too_long(self):
