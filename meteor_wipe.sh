@@ -23,36 +23,21 @@ run_lcd_anim() {
     export TERM=linux
     export PYTHONPATH="$BIN${PYTHONPATH:+:$PYTHONPATH}"
 
-    sudo chvt 1 >>"$log" 2>&1 || true
-    sudo setterm -term linux -clear all >/dev/tty1 2>>"$log" \
-        || sudo sh -c 'printf "\033[2J\033[H\033[?25l" > /dev/tty1' 2>>"$log" \
-        || true
-
-    run_as_user() {
-        if command -v runuser >/dev/null 2>&1; then
-            runuser -u "$USER" -- "$@"
+    # /dev/tty1 is root-owned on the Pi; openvt(1) here returns without waiting.
+    # Paint the physical TFT by running the anim as root with stdout on tty1.
+    if [ -e /dev/tty1 ]; then
+        sudo chvt 1 >>"$log" 2>&1 || true
+        sudo sh -c "printf '\033[2J\033[H\033[?25l' > /dev/tty1" 2>>"$log" || true
+        if sudo sh -c "env TERM=linux COLUMNS=40 LINES=34 PYTHONPATH='$PYTHONPATH' python3 '$py' > /dev/tty1 2>>'$log'"; then
+            echo "tty1 ok" >>"$log"
         else
-            sudo -u "$USER" "$@"
-        fi
-    }
-
-    # openvt -u is for init login-as-VT-owner — never combine with -c (openvt(1)).
-    if command -v openvt >/dev/null 2>&1 && [ -e /dev/tty1 ]; then
-        if sudo openvt -c 1 -s -f -- \
-            run_as_user env TERM=linux COLUMNS=40 LINES=34 HOME="$HOME" USER="$USER" \
-                PATH="$PATH" PYTHONPATH="$PYTHONPATH" \
-                python3 "$py" >>"$log" 2>&1; then
-            echo "openvt ok" >>"$log"
-        else
-            echo "openvt failed exit=$?" >>"$log"
-            run_as_user env TERM=linux COLUMNS=40 LINES=34 PYTHONPATH="$PYTHONPATH" \
-                python3 "$py" >>"$log" 2>&1 || true
+            echo "tty1 failed exit=$?" >>"$log"
         fi
     elif [ -z "${SSH_CONNECTION:-}" ] && [ "$(tty 2>/dev/null || echo)" = "/dev/tty1" ]; then
-        run_as_user env TERM=linux COLUMNS=40 LINES=34 PYTHONPATH="$PYTHONPATH" \
+        env TERM=linux COLUMNS=40 LINES=34 PYTHONPATH="$PYTHONPATH" \
             python3 "$py" >>"$log" 2>&1 || true
     else
-        echo "no tty1 path" >>"$log"
+        echo "no /dev/tty1" >>"$log"
     fi
     echo "done $(date -u +%FT%TZ)" >>"$log"
 }
