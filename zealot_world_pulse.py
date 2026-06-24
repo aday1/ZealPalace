@@ -258,6 +258,10 @@ def world_context_blurb(limit: int = 4) -> str:
 
 
 def _broadcast_party_memory(category: str, body: str) -> None:
+    # Do NOT fan outage/incident pulses out to every NPC -- that primed the whole
+    # party to narrate the same "host stands cold and silent" doom in unison.
+    if category in ("noc", "pbx"):
+        return
     rpg = _rpg()
     try:
         rpg._ensure_crystal_mesh_party()

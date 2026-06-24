@@ -4049,6 +4049,9 @@ def _filter_memory_bits(bits: list[str]) -> list[str]:
     out: list[str] = []
     for bit in bits:
         low = bit.lower()
+        # Keep personal RP memory out of outage-doom territory entirely.
+        if any(p in low for p in OMEN_PHRASES):
+            continue
         skip = False
         for kw in HOMELAB_LOOP_KEYWORDS:
             if kw in low:
