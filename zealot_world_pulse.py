@@ -249,6 +249,10 @@ def world_context_blurb(limit: int = 4) -> str:
     except Exception:
         pass
     for row in load_recent_world_events(limit * 2):
+        # Never feed NOC/PBX outage pulses into NPC narration prompts -- that made
+        # every companion riff "host stands cold and silent" in unison.
+        if row.get("category") in ("noc", "pbx"):
+            continue
         bit = f"{row.get('category')}: {row.get('title')} — {row.get('body', '')[:70]}"
         if _blurb_part_ok(bit):
             parts.append(bit)
