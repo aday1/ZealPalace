@@ -3925,6 +3925,19 @@ OMEN_PHRASES = (
     'foreboding shadow', 'snuffed', 'darkness falls', 'watchtower',
 )
 OMEN_WINDOW_MAX = 1          # at most this many doom/omen lines per recent window
+# External CELES NOC-realm narrator / pulse personas. They post status narration
+# to #RPG; the DungeonMaster should NOT narrate a reply to each (that doubled the
+# pulse noise and buried real party chatter).
+NARRATOR_NICKS = frozenset({
+    'celes-marshal', 'hermes-warden', 'joshua-wopr', 'aeris-garden', 'mira-root',
+    'bofh-it', 'navi', 'grok-paranoid', 'holybell', 'misato-neon', 'yomiko',
+})
+NARRATOR_SUFFIXES = ('-marshal', '-warden', '-wopr', '-garden', '-root', '-it', '-neon', '-paranoid')
+
+
+def _is_narrator_nick(nick: str) -> bool:
+    n = str(nick or '').rstrip('_').lower()
+    return n in NARRATOR_NICKS or n.endswith(NARRATOR_SUFFIXES)
 _party_recent_lines: list[str] = []
 NPC_BLOG_STATE_FILE = NPC_DIR / 'blog_publish_state.json'
 BLOG_MIN_GAP_SEC = 7200       # 2h between posts per NPC
@@ -7686,6 +7699,10 @@ class RPGEngine:
         elif cmd.startswith('/npc'):
             self._cmd_npc(nick, msg)
         else:
+            # Don't let the DM narrate a reply to the CELES pulse/narrator bots
+            # (their line still shows on IRC/LCD; we just stop doubling it).
+            if _is_narrator_nick(nick):
+                return
             # Treat as free-form action - let Ollama DM interpret
             self._cmd_action(nick, msg)
 
