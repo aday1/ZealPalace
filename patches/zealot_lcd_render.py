@@ -668,11 +668,13 @@ def zeal_clock_bit(now: float, max_len: int | None = None) -> str:
 
 
 def top_status_segments(now: float | None = None, width: int = WIDTH) -> list[tuple[str, str]]:
-    """Top row: ZEAL clock + ISO week on the left, Friday counter filling the rest."""
+    """Top row: ZEAL clock on the left, Friday counter filling the rest.
+
+    The ISO week lives once on the calendar row -- not duplicated here.
+    """
     ts = time.time() if now is None else now
     dt = datetime.fromtimestamp(ts)
-    iso_week = max(1, min(52, int(dt.isocalendar().week)))
-    clock = f"ZEAL {dt:%H:%M:%S} W{iso_week:02d}"
+    clock = f"ZEAL {dt:%H:%M:%S}"
     clock_segs: list[tuple[str, str]] = [(clock, "CYAN")]
     room = width - len(clock) - 1
     if room >= 12:
@@ -782,17 +784,27 @@ def ticker_scroll_frames(snapshot: dict[str, Any], now: float | None = None) -> 
         frames.append(f"VOICEMAIL {vm_new} NEW")
     zone = normalize_line(bridge.get("hot_zone"))
     if zone:
-        frames.append(f"ZONE {zone[:18]}")
+        frames.append(f"ZONE {zone[:20]}")
     npc = int(bridge.get("npc_count") or 0)
-    if npc:
-        frames.append(f"NPC ACTIVE {npc}")
-    frames.extend(agent_ticker_bits(status, now=ts))
+    players = int(bridge.get("players_total") or 0)
+    if npc or players:
+        frames.append(f"PARTY NPC {npc} PLAYERS {players}")
+    for bit in agent_ticker_bits(status, now=ts):
+        frames.append(normalize_line(bit))
     gpu = gpu_summary(snapshot)
     if gpu and gpu != "GPU telemetry warming up":
         frames.append(gpu)
-    if not frames:
-        frames.append(f"MESH OK tkr {LCD_TICKER_VERSION}")
-    return frames
+    # Denoise: drop blanks, collapse case-insensitive duplicates, keep order.
+    seen: set[str] = set()
+    out: list[str] = []
+    for frame in frames:
+        clean = normalize_line(frame)
+        if clean and clean.lower() not in seen:
+            seen.add(clean.lower())
+            out.append(clean)
+    if not out:
+        out.append(f"CRYSTAL MESH OK · tkr {LCD_TICKER_VERSION}")
+    return out
 
 
 def ticker_scroll_body(snapshot: dict[str, Any], now: float | None = None) -> str:
