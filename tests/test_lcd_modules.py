@@ -36,8 +36,11 @@ from zealot_lcd_render import (
     work_week_phase,
     weekend_monday_countdown_line,
     chunky_scroller,
+    header_ticker_line,
+    header_ticker_segments,
     compact_bar,
     comet_line,
+    comet_line_segments,
     dashboard_footer,
     dashboard_footer_segments,
     demoscene_bottom_scroller,
@@ -152,9 +155,18 @@ class LcdRenderTests(unittest.TestCase):
             for row in mode_art(mode, now=1, width=WIDTH):
                 self.assertEqual(len(row), WIDTH)
 
+    def test_comet_line_segments_events_is_magenta(self):
+        segs = comet_line_segments("EVENTS", now=1.0, width=WIDTH)
+        joined = "".join(text for text, _style in segs)
+        self.assertEqual(len(joined), WIDTH)
+        self.assertIn("EVENTS", joined)
+        label_styles = {style for text, style in segs if "EVENTS" in text}
+        self.assertIn("MAG", label_styles)
+
     def test_graph_helpers_are_fixed_width(self):
-        self.assertEqual(len(bar(55, width=8)), 10)
+        self.assertEqual(len(bar(55, width=8)), 8)
         self.assertIn("█", bar(55, width=8))
+        self.assertEqual(bar(55, width=8)[-1], chr(0x258F))
         self.assertEqual(len(compact_bar(55, width=6)), 6)
         self.assertEqual(len(spark([0, 25, 50, 75, 100], width=12)), 12)
         self.assertIn("█", spark([100], width=1))
@@ -455,6 +467,35 @@ class ModeBarTests(unittest.TestCase):
         self.assertNotIn("#00042", joined)
         self.assertNotIn("W25", joined)
 
+    def test_dashboard_footer_holds_motive_and_scrolls_full_text(self):
+        from zealot_lcd_render import MOTIVE_PERIOD_SEC, PSEUDOCORP_MOTIVATORS, stable_pick
+
+        snapshot = {"status": {"telemetry": {"local": {"host": "zealpalace", "ip": "10.13.37.76"}}}}
+        now = 1_700_000_000.0
+        seg_a = dashboard_footer_segments(snapshot, now=now, tick=1, width=WIDTH)
+        seg_b = dashboard_footer_segments(snapshot, now=now, tick=2, width=WIDTH)
+        joined_a = "".join(text for text, _style in seg_a)
+        joined_b = "".join(text for text, _style in seg_b)
+        self.assertEqual(joined_a, joined_b)
+        self.assertNotIn("...", joined_a)
+        motive = stable_pick(PSEUDOCORP_MOTIVATORS, now, period=MOTIVE_PERIOD_SEC, salt="footer-motd")
+        long_seen = ""
+        for tick in range(0, 240, 8):
+            row = dashboard_footer_segments(snapshot, now=now + tick, tick=tick, width=WIDTH)
+            long_seen += "".join(text for text, _style in row)
+        self.assertIn(motive.split()[2], long_seen)
+        self.assertIn("zealpa", long_seen.lower())
+
+    def test_greetz_scroll_reveals_full_packets_line(self):
+        from zealot_lcd_render import FX_ROW_PERIOD_SEC, scroll_speed_for_text
+
+        line = "PSEUDOCORP BOARD UPDATE: ALL HANDS, NO HANDS, JUST PACKETS"
+        speed = scroll_speed_for_text(line, FX_ROW_PERIOD_SEC, WIDTH)
+        seen = ""
+        for step in range(0, int(FX_ROW_PERIOD_SEC * 3) + 1):
+            seen += header_ticker_line(line, float(step), WIDTH, speed=speed)
+        self.assertIn("PACKETS", seen)
+
     def test_panel_section_label_differs_from_mode_title(self):
         self.assertEqual(panel_section_label("terrarium"), "LAN VITALS")
         self.assertEqual(panel_section_label("lounge"), "LIVE CHATTER")
@@ -489,9 +530,76 @@ class TickerTests(unittest.TestCase):
         row = ticker_text(snapshot, now=now)
         self.assertIn(LCD_TICKER_VERSION, row)
         self.assertIn("NAVI", row)
-        self.assertIn("SIMON", row)
+        self.assertIn("BOFH", row)
         self.assertIn("LAWYER", row)
         self.assertLessEqual(len(row.split(" · ")[0]), 20)
+
+    def test_ticker_includes_hermes_and_holly_when_fresh(self):
+        now = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc).timestamp()
+        recent = "2026-06-17T11:30:00Z"
+        snapshot = {
+            "status": {
+                "vector_ok": True,
+                "pbx_api_ok": True,
+                "agent_tickers": {
+                    "agents": {
+                        "111": {"summary": "Hermes routed SMS to yggdrasil"},
+                        "117": {"summary": "Holybell mesh sync lag 12s"},
+                    }
+                },
+                "pbx_phones": {
+                    "phones": [
+                        {"ext": "111", "last_call": recent},
+                        {"ext": "117", "last_call": recent},
+                    ]
+                },
+                "navi": {},
+            },
+            "bridge": {},
+        }
+        bits = agent_ticker_bits(snapshot["status"], now=now)
+        joined = " ".join(bits)
+        self.assertIn("HERMES", joined)
+        self.assertIn("HOLLY", joined)
+
+    def test_header_ticker_line_centers_short_text(self):
+        line = header_ticker_line("NAVI session saved", now=1.0, width=40)
+        self.assertEqual(len(line), 40)
+        self.assertEqual(line.strip(), "NAVI session saved")
+        self.assertTrue(line.startswith(" "))
+
+    def test_header_ticker_segments_center_crystal_mesh_ok(self):
+        segs = header_ticker_segments("CRYSTAL MESH OK · tkr tkr0624k", now=1.0, width=40)
+        joined = "".join(text for text, _style in segs)
+        self.assertEqual(len(joined), 40)
+        self.assertEqual(joined.strip(), "CRYSTAL MESH OK · tkr tkr0624k")
+        self.assertGreater(joined.find("CRYSTAL MESH"), 0)
+        self.assertLess(joined.find("CRYSTAL MESH"), joined.rfind("tkr0624k"))
+
+    def test_tunnel_line_centers_crystal_mesh_bus(self):
+        line = tunnel_line(now=0.0, width=40)
+        self.assertEqual(len(line), 40)
+        self.assertIn("CRYSTAL MESH BUS", line)
+        self.assertGreater(line.find("CRYSTAL MESH BUS"), 0)
+
+    def test_tunnel_line_centers_noc_and_terrarium_frames(self):
+        from zealot_lcd_render import TUNNEL_FRAMES
+
+        for frame in TUNNEL_FRAMES[1:]:
+            line = header_ticker_line(frame, now=0.0, width=40)
+            self.assertEqual(len(line), 40)
+            label = "LAN TERRARIUM LINK" if "TERRARIUM" in frame else "PSEUDOCORP NOC FEED"
+            self.assertIn(label, line)
+            self.assertGreater(line.find(label), 0)
+
+    def test_header_ticker_line_scrolls_long_agent_summary(self):
+        long_msg = "BOFH IT-1 open: broken screen on desk 4 needs replacement panel ASAP"
+        seen = ""
+        for tick in range(0, 120, 5):
+            seen += header_ticker_line(long_msg, now=float(tick), width=40)
+        self.assertEqual(len(header_ticker_line(long_msg, now=0.0, width=40)), 40)
+        for word in ("BOFH", "broken", "replacement", "ASAP"):
+            self.assertIn(word, seen)
 
     def test_ticker_hides_idle_and_stale_agent_summaries(self):
         now = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc).timestamp()
@@ -513,7 +621,7 @@ class TickerTests(unittest.TestCase):
         }
         row = ticker_text(snapshot, now=now)
         self.assertNotIn("NAVI", row)
-        self.assertNotIn("SIMON", row)
+        self.assertNotIn("BOFH", row)
         self.assertNotIn("LAWYER", row)
 
     def test_lan_bus_line_fits_width(self):
@@ -715,6 +823,46 @@ class AgentsPanelTests(unittest.TestCase):
         self.assertNotIn("NIF", summary)
         self.assertNotIn("FRESH", summary)
 
+    def test_uptime_panel_has_no_block_bars(self):
+        from zealot_lcd_render import panel_lines, uptime_table_header
+
+        snapshot = {
+            "status": {
+                "telemetry": {
+                    "local": {
+                        "host": "zealpalace",
+                        "uptime_sec": 86400 * 5,
+                        "cpu_pct": 12.0,
+                        "mem_pct": 40.0,
+                        "load1": 0.4,
+                        "ok": True,
+                    },
+                    "remote": {
+                        "hosts": {
+                            "vector": {
+                                "uptime_sec": 86400 * 12,
+                                "cpu_pct": 8.0,
+                                "mem_pct": 55.0,
+                                "load1": 1.2,
+                                "cores": 8,
+                                "ok": True,
+                            },
+                        }
+                    },
+                },
+                "noc": {},
+            },
+            "bridge": {},
+            "events": [],
+        }
+        rows = panel_lines(snapshot, "uptime", WIDTH, now=1_700_000_000.0)
+        joined = "\n".join(text for text, _style in rows if isinstance(text, str))
+        self.assertNotIn(chr(0x2588), joined)
+        self.assertNotIn(chr(0x258F), joined)
+        header = uptime_table_header(WIDTH)
+        self.assertIn("UP-TIME", header)
+        self.assertNotIn("BLOCK BAR", header)
+
     def test_vitals_row_uses_full_width(self):
         from zealot_lcd_render import vitals_row
 
@@ -726,11 +874,22 @@ class AgentsPanelTests(unittest.TestCase):
         segments = mesh_table_row_segments("ZEA", "1", 3600, 12.0, WIDTH)
         text = "".join(part for part, _style in segments)
         self.assertIn("ZEA", text)
-        self.assertIn("1h00m", text)
-        self.assertLessEqual(len(text), WIDTH)
-        styles = [style for _part, style in segments]
-        self.assertEqual(styles[0], "NOC")
-        self.assertEqual(styles[1], "GREEN")
+        self.assertEqual(len(text), WIDTH)
+
+    def test_mesh_table_header_and_row_fit_width(self):
+        from zealot_lcd_render import ascii_bar, bar, mesh_bar_widths, mesh_join, mesh_table_header, mesh_table_row
+
+        header = mesh_table_header(now=0.0, width=WIDTH)
+        self.assertEqual(len(header), WIDTH)
+        self.assertIn("BLOCK BAR", header)
+        row = mesh_table_row("ZEA", "1", 3600, 55.0, WIDTH)
+        self.assertEqual(len(row), WIDTH)
+        uni_w = mesh_bar_widths(WIDTH)[1]
+        block = bar(55.0, uni_w)
+        self.assertEqual(len(block), uni_w)
+        self.assertEqual(block[-1], chr(0x258F))
+        joined = mesh_join("ZEA", "1", "3m", "55%", ascii_bar(55.0, 11), block, WIDTH)
+        self.assertEqual(len(joined), WIDTH)
 
     def test_fmt_age_short_now_threshold(self):
         self.assertEqual(fmt_age_short(10), "now")

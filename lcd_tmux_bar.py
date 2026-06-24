@@ -15,9 +15,12 @@ except Exception:  # pragma: no cover - optional on development hosts
     tmux_status_segments = None
 
 try:
-    from zealot_lcd_render import LCD_TICKER_VERSION
+    from zealot_lcd_render import LCD_TICKER_VERSION, meteor_strike_age_label
 except Exception:  # pragma: no cover - optional on development hosts
     LCD_TICKER_VERSION = "tkr?"
+
+    def meteor_strike_age_label(now: float | None = None) -> str:
+        return "MET ?"
 
 _SESSION = "lcd"
 _LAST_KEY = ""
@@ -81,13 +84,14 @@ def _ensure_tmux_layout() -> None:
         return
     _LAYOUT_DONE = True
     for args in (
+        ["tmux", "set-option", "-t", _SESSION, "status-style", "bg=black,fg=white"],
         ["tmux", "set-option", "-t", _SESSION, "status-left", ""],
-        ["tmux", "set-option", "-t", _SESSION, "status-left-length", "24"],
+        ["tmux", "set-option", "-t", _SESSION, "status-left-length", "36"],
         ["tmux", "set-window-option", "-t", _SESSION, "window-status-format", ""],
         ["tmux", "set-window-option", "-t", _SESSION, "window-status-current-format", ""],
         ["tmux", "set-option", "-t", _SESSION, "window-status-separator", ""],
         ["tmux", "set-option", "-t", _SESSION, "status-justify", "left"],
-        ["tmux", "set-option", "-t", _SESSION, "status-right-length", "24"],
+        ["tmux", "set-option", "-t", _SESSION, "status-right-length", "28"],
     ):
         _tmux_run(args)
 
@@ -95,9 +99,9 @@ def _ensure_tmux_layout() -> None:
 def _ok_tmux(token: str) -> str:
     label, state = token.split(":", 1) if ":" in token else (token, "")
     if state == "OK":
-        return f"#[fg=green]{label}:OK#[default]"
+        return f"#[fg=green,bold]{label}:OK#[default]"
     if state == "DN":
-        return f"#[fg=red]{label}:DN#[default]"
+        return f"#[fg=red,bold]{label}:DN#[default]"
     return token
 
 
@@ -111,18 +115,22 @@ def _build_status(
     ip = _lan_ip()
     if wopr_caller:
         caller = str(wopr_caller).strip() or "?"
-        left = f"#[fg=red,bold]J124@{caller}#[default] WOPR"
-        right = f"#[fg=green]{host} {ip} #[fg=yellow]{TMUX_TIME_FMT}"
+        left = f"#[fg=red,bold]J124@{caller}#[default] #[fg=white]WOPR#[default]"
+        right = f"#[fg=white]{host} {ip}#[default]"
         return left, right
 
-    # Bottom physical row: LCD version + last-deploy stamp (left), IP + host (right).
-    # No live clock here -- the top ZEAL row already shows the time (don't state it twice).
+    # Bottom physical row: black bar, white/yellow text only (no cyan on green).
     if tmux_status_segments is not None and snapshot is not None:
         _plain_left, plain_ip = tmux_status_segments(snapshot, mode)
         ip = plain_ip or ip
     ver, dep = _build_stamp()
-    left = f"#[fg=yellow,bold]{ver}#[default] #[fg=cyan]dep {dep}#[default]"
-    right = f"#[fg=green]{ip} #[fg=cyan]{host}#[default]"
+    meteor = meteor_strike_age_label()
+    left = (
+        f"#[fg=yellow,bold]{ver}#[default] "
+        f"#[fg=white]{meteor}#[default] "
+        f"#[fg=white]dep {dep}#[default]"
+    )
+    right = f"#[fg=white]{ip}#[default] #[fg=yellow]{host}#[default]"
     return left, right
 
 
@@ -141,8 +149,9 @@ def set_tmux_bar(
     if not force and key == _LAST_KEY:
         return
     _LAST_KEY = key
+    _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-style", "bg=black,fg=white"])
     _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-left", left])
-    _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-left-length", "24"])
+    _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-left-length", "36"])
     _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-right", right])
     # Keep the tmux window list ('2:$-' junk) blanked even after window churn.
     _tmux_run(["tmux", "set-window-option", "-t", _SESSION, "window-status-format", ""])

@@ -2,6 +2,7 @@
 """Pure text rendering helpers for the ZealPalace LCD."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import socket
@@ -51,13 +52,31 @@ HEIGHT = 34
 LCD_HEADER_ROWS = 3
 LCD_MODE_BAR_ROWS = 1
 LCD_ART_ROWS = 3
-LCD_PANEL_MAX_ROWS = 7
+LCD_PANEL_MAX_ROWS = 5
 LCD_MID_FOOTER_ROWS = 2
 LCD_FX_ROWS = 1
 LCD_EVENTS_HEADER_ROWS = 1
-LCD_EVENTS_MIN_ROWS = 8
-LCD_EVENT_MAX_BODY_LINES = 8
-LCD_EVENT_OLD_MAX_LINES = 2
+LCD_EVENTS_MIN_ROWS = 14
+LCD_EVENTS_ON_SCREEN = 24
+LCD_EVENT_MAX_BODY_LINES = 14
+LCD_EVENT_OLD_CHATTER_LINES = 6
+LCD_EVENT_OLD_MAX_LINES = 6
+LCD_EVENT_OLD_NARRATIVE_LINES = 3
+NARRATIVE_EVENT_KINDS = frozenset(
+    {
+        "lore",
+        "bridge",
+        "gm_queue",
+        "gm",
+        "battle",
+        "realm_event",
+        "travel",
+        "weather",
+        "notice",
+        "world",
+        "pulse",
+    }
+)
 LCD_EVENT_DANGLING_WORDS = frozenset(
     {
         "the",
@@ -149,7 +168,9 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0624g"
+FOOTER_SCROLLER_SPEED = 0.35
+FOOTER_FRAME_PERIOD_SEC = 15.0
+LCD_TICKER_VERSION = "tkr0624p"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -167,6 +188,14 @@ AGENT_TICKER_SHOW_SEC = 25 * 60
 AGENT_TICKER_IDLE_RE = re.compile(
     r"(?i)(quiet|no tickets|ticket desk idle|intake folder|standing by|"
     r"no prior calls|file open|awaiting further|tap navi|parody counsel)"
+)
+# Header ticker row: PBX agents whose call summaries rotate on row 3.
+AGENT_TICKER_ROSTER: tuple[tuple[str, str], ...] = (
+    ("111", "HERMES"),
+    ("117", "HOLLY"),
+    ("122", "NAVI"),
+    ("123", "BOFH"),
+    ("130", "LAWYER"),
 )
 _AGENT_TICKER_SEEN: dict[str, tuple[str, float]] = {}
 RASTER_SPEED = 0.35
@@ -224,8 +253,8 @@ PANEL_SECTION_LABELS: dict[str, str] = {
 }
 TAB_SHORT = dict(MODE_TAB_SHORT)
 
-MESH_COL_ASCII = "ASCII BAR "
-MESH_COL_BLOCK = "BLOCK BAR "
+MESH_COL_ASCII = "ASCII BAR"
+MESH_COL_BLOCK = "BLOCK BAR"
 DETAIL_KEY_W = 12
 OPS_DETAIL_KEY_W = 10
 TERRARIUM_DETAIL_KEY_W = 10
@@ -314,12 +343,21 @@ def pad(text: Any, width: int = WIDTH) -> str:
 
 
 def center(text: Any, width: int = WIDTH) -> str:
-    value = str(text or "")[:width]
+    value = str(text or "").strip()
     if len(value) >= width:
         return value[:width]
     pad_total = width - len(value)
     left = pad_total // 2
     return " " * left + value + " " * (pad_total - left)
+
+
+def scroll_speed_for_text(text: str, period: float, width: int = WIDTH) -> float:
+    """Pick a marquee speed that traverses the full line within one display period."""
+    core = normalize_line(text)
+    travel = max(0, len(core) + 3 - width)
+    if travel <= 0:
+        return TICKER_SCROLLER_SPEED
+    return min(4.0, max(0.6, travel / max(1.0, period)))
 
 
 def fmt_duration_short(seconds: Any) -> str:
@@ -335,6 +373,25 @@ def fmt_duration_short(seconds: Any) -> str:
     if hours:
         return f"{hours}h{minutes:02d}m"
     return f"{minutes}m"
+
+
+WIPE_TIMESTAMPS_FILE = Path.home() / ".cache" / "zealot" / "wipe_timestamps.json"
+
+
+def meteor_strike_age_label(now: float | None = None) -> str:
+    """Compact age since last meteor wipe for the physical tmux row."""
+    ts = time.time() if now is None else now
+    try:
+        data = json.loads(WIPE_TIMESTAMPS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError, TypeError):
+        return "MET ?"
+    raw = str(data.get("last_meteor") or data.get("last_genesis") or "").strip()
+    if not raw:
+        return "MET ?"
+    strike = parse_iso_ts(raw)
+    if strike <= 0:
+        return "MET ?"
+    return f"MET+{fmt_duration_short(int(ts - strike))}"
 
 
 def calendar_line(now: float | None = None, width: int = WIDTH) -> str:
@@ -853,6 +910,39 @@ def ticker_scroll_body(snapshot: dict[str, Any], now: float | None = None) -> st
     _TICKER_SCROLL_CACHE["key"] = key
     _TICKER_SCROLL_CACHE["body"] = body
     return body
+
+
+def header_ticker_line(
+    text: str,
+    now: float,
+    width: int = WIDTH,
+    speed: float = TICKER_SCROLLER_SPEED,
+) -> str:
+    """Header row 3: center short frames; marquee-scroll long agent/NOC lines in full."""
+    core = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not core:
+        core = f"CRYSTAL MESH OK tkr {LCD_TICKER_VERSION}"
+    if len(core) <= width:
+        return center(core, width)
+    body = core + "   "
+    offset = int(now * speed) % len(body)
+    loop = body + body
+    return pad(loop[offset : offset + width], width)
+
+
+def header_ticker_segments(
+    text: str,
+    now: float,
+    width: int = WIDTH,
+    speed: float = TICKER_SCROLLER_SPEED,
+) -> list[tuple[str, str]]:
+    """Header row 3 segments — center short frames; scroll long lines in full."""
+    core = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not core:
+        core = f"CRYSTAL MESH OK tkr {LCD_TICKER_VERSION}"
+    if len(core) <= width:
+        return [(center(core, width), "NOC")]
+    return [(header_ticker_line(text, now, width, speed=speed), "NOC")]
 
 
 def compact_mode_rotator(mode: str, now: float, width: int = 8) -> str:
@@ -1555,9 +1645,61 @@ def vitals_row(
         fmt_metric_cell(cpu_pct),
         fmt_metric_cell(mem_pct),
         fmt_metric_cell(disk_pct),
-        bar(disk_pct if disk_pct is not None else 0, VITALS_BAR_W - 2),
+        bar(disk_pct if disk_pct is not None else 0, VITALS_BAR_W),
         width,
     )
+
+
+def uptime_table_header(width: int = WIDTH) -> str:
+    """Boot-age grid — uptime text only, no block bars (disk bars live on terrarium/NOC)."""
+    line = (
+        f"{'HOST':<5} "
+        f"{'UP-TIME':<10} "
+        f"{'CPU%':<4} "
+        f"{'MEM%':<4} "
+        f"{'LOD%':<4} "
+        f"{'SERVICE':<8}"
+    )
+    return pad(line, width)
+
+
+def uptime_table_rule(width: int = WIDTH) -> str:
+    return pad(
+        f"{'-----':<5} {'----------':<10} {'----':<4} {'----':<4} {'----':<4} {'--------':<8}",
+        width,
+    )
+
+
+def _host_service_tag(host: dict[str, Any] | None) -> str:
+    if not host:
+        return "offline"
+    if host.get("ok") is False:
+        return "down"
+    return "online"
+
+
+def uptime_host_row(
+    label: str,
+    host: dict[str, Any] | None,
+    width: int = WIDTH,
+) -> str:
+    if not host:
+        line = f"{pad(label, 5)[:5]} {'------':<10} {' --':<4} {' --':<4} {' --':<4} {'offline':<8}"
+        return pad(line, width)
+    up = fmt_uptime(host.get("uptime_sec"))
+    cpu = fmt_metric_cell(host.get("cpu_pct"))
+    mem = fmt_metric_cell(host.get("mem_pct"))
+    load = fmt_metric_cell(host_mesh_metric(host, "load1"))
+    status = _host_service_tag(host)
+    line = (
+        f"{pad(label, 5)[:5]} "
+        f"{pad(up, 10)[:10]} "
+        f"{cpu} "
+        f"{mem} "
+        f"{load} "
+        f"{pad(status, 8)[:8]}"
+    )
+    return pad(line, width)
 
 
 def mode_tab_bar(active: str, width: int = WIDTH) -> str:
@@ -1746,10 +1888,18 @@ def ping_row_style(ping: str) -> str:
 
 def mesh_bar_widths(width: int = WIDTH) -> tuple[int, int]:
     """Split remaining row width between ASCII and block metric bars."""
-    prefix_len = 5 + 1 + 1 + 6 + 1 + 4 + 1  # host ping up ds + spaces
-    bar_room = max(12, width - prefix_len)
+    # mesh_join: host(5) ping(1) sp up(6) sp ds(4) sp ascii sp uni = width
+    fixed = 20
+    bar_room = max(12, width - fixed)
     ascii_w = max(8, (bar_room * 10 + 8) // 18)
     uni_w = max(6, bar_room - ascii_w)
+    while fixed + ascii_w + uni_w > width:
+        if ascii_w > 8:
+            ascii_w -= 1
+        elif uni_w > 6:
+            uni_w -= 1
+        else:
+            break
     return ascii_w, uni_w
 
 
@@ -2109,33 +2259,16 @@ def dashboard_footer_segments(
         PSEUDOCORP_MOTIVATORS,
         now,
         period=MOTIVE_PERIOD_SEC,
-        salt=str(int(now)),
+        salt="footer-motd",
     )
-    core = f"{host_ip} | {short_text(motive, 24)}"
-    fx_tick = int(now * 1.2)
-    left = SCROLLER_FX_EDGE[fx_tick % len(SCROLLER_FX_EDGE)]
-    right = SCROLLER_FX_EDGE[(fx_tick + 1) % len(SCROLLER_FX_EDGE)]
-    prefix = left + " "
-    room = max(8, width - len(prefix) - len(right) - 1)
-    scroll = marquee(core + "   ", room, speed=1.0, now=now)
-    segments: list[tuple[str, str]] = [
-        (prefix, "MOTD_FX"),
-        (scroll, "MOTD"),
-        (" " + right, "MOTD_FX"),
-    ]
-    line = fit("".join(text for text, _style in segments), width)
-    used = 0
-    out: list[tuple[str, str]] = []
-    for text, style in segments:
-        if used >= width:
-            break
-        chunk = text[: max(0, width - used)]
-        if chunk:
-            out.append((chunk, style))
-            used += len(chunk)
-    if not out:
-        return [(line, "MOTD")]
-    return out
+    frames: list[str] = []
+    if host_ip:
+        frames.append(host_ip)
+    frames.append(normalize_line(motive))
+    body = frames[int(now // FOOTER_FRAME_PERIOD_SEC) % len(frames)]
+    speed = scroll_speed_for_text(body, FOOTER_FRAME_PERIOD_SEC, width)
+    line = header_ticker_line(body, now, width, speed=speed)
+    return [(line, "MOTD")]
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -2271,13 +2404,17 @@ def cga_rule(width: int = WIDTH) -> str:
     return pad("+" + ("=" * 8) + "+" + ("-" * max(0, width - 18)) + "+" + ("=" * 6) + "+", width)
 
 
+TUNNEL_FRAMES: tuple[str, ...] = (
+    "<~~~~ CRYSTAL MESH BUS ~~~~>",
+    "<<~~~ LAN TERRARIUM LINK ~~~>>",
+    "<~~~ PSEUDOCORP NOC FEED ~~~>",
+)
+
+
 def tunnel_line(now: float, width: int = WIDTH) -> str:
-    frames = (
-        "<~~~~ CRYSTAL MESH BUS ~~~~>",
-        "<<~~~ LAN TERRARIUM LINK ~~~>>",
-        "<~~~ PSEUDOCORP NOC FEED ~~~>",
-    )
-    return pad(frames[int(anim_now(now, 12.0) * TUNNEL_SPEED) % len(frames)], width)
+    frame = TUNNEL_FRAMES[int(anim_now(now, 12.0) * TUNNEL_SPEED) % len(TUNNEL_FRAMES)]
+    speed = scroll_speed_for_text(frame, FX_ROW_PERIOD_SEC, width)
+    return header_ticker_line(frame, now, width, speed=speed)
 
 
 def gpu_summary(snapshot: dict[str, Any]) -> str:
@@ -2296,12 +2433,9 @@ def gpu_summary(snapshot: dict[str, Any]) -> str:
 
 
 def demoscene_greetz(snapshot: dict[str, Any], now: float, width: int = WIDTH) -> str:
-    salt = gpu_summary(snapshot)
-    greetz = stable_pick(PSEUDOCORP_GREETZ, now, period=GREETZ_PERIOD_SEC, salt=salt)
-    body = greetz + " // " + salt
-    if len(body) <= width:
-        return fit(body, width)
-    return chunky_scroller(body, anim_now(now, GREETZ_PERIOD_SEC), width, speed=SCROLLER_SPEED * 0.5)
+    greetz = stable_pick(PSEUDOCORP_GREETZ, now, period=GREETZ_PERIOD_SEC, salt="greetz")
+    speed = scroll_speed_for_text(greetz, FX_ROW_PERIOD_SEC, width)
+    return header_ticker_line(greetz, now, width, speed=speed)
 
 
 FX_ROW_PERIOD_SEC = 9.0
@@ -2350,10 +2484,10 @@ MODE_ART: dict[str, tuple[str, ...]] = {
         "+-- no reboot kabuki",
     ),
     "rpg": (
-        "  /\\  CRYSTAL MESH  /\\ ",
-        " /  \\/  RGB TORCH  /  \\",
-        "| [__] IRC+BRIDGE [__] |",
-        "  \\__/  quests live \\__/",
+        "CRYSTAL MESH",
+        "RGB TORCH",
+        "IRC + BRIDGE",
+        "quests live",
     ),
     "rgb": (
         "+---- RGB BATTLE ----+",
@@ -2406,12 +2540,59 @@ def comet_line(label: str, now: float, width: int = WIDTH) -> str:
     return pad("".join(chars), width)
 
 
+def comet_line_segments(label: str, now: float, width: int = WIDTH) -> list[tuple[str, str]]:
+    """Comet header — label + comet trail in magenta, rail dashes dim."""
+    raw = comet_line(label, now, width)
+    title = f" {label.strip()} "
+    t_start = max(0, (width - len(title)) // 2)
+    t_end = t_start + len(title)
+    segments: list[tuple[str, str]] = []
+    idx = 0
+    while idx < len(raw):
+        ch = raw[idx]
+        if t_start <= idx < t_end and ch != " ":
+            style = "MAG"
+        elif ch in ">=":
+            style = "MAG"
+        else:
+            style = "MOTD_FX"
+        run = ch
+        j = idx + 1
+        while j < len(raw):
+            cj = raw[j]
+            if t_start <= j < t_end and cj != " ":
+                sj = "MAG"
+            elif cj in ">=":
+                sj = "MAG"
+            else:
+                sj = "MOTD_FX"
+            if sj != style:
+                break
+            run += cj
+            j += 1
+        segments.append((run, style))
+        idx = j
+    return pad_colored_segments(segments, width)
+
+
 def mode_art(mode: str, now: float, width: int = WIDTH) -> list[str]:
     if mode == "rgb":
         rows = list(RGB_BATTLE_FRAMES[int(anim_now(now, RGB_FRAME_SEC) // RGB_FRAME_SEC) % len(RGB_BATTLE_FRAMES)])
     else:
         rows = list(MODE_ART.get(mode, MODE_ART["lounge"]))
-    # Block-center the ASCII box, then animate ANSI bands in the side margins
+    if mode == "rpg":
+        tick = int(anim_now(now, 1.0))
+        bands = "._-=*=-."
+        out: list[str] = []
+        for i, row in enumerate(rows):
+            core = center(row.strip(), width)
+            cells = list(core)
+            for col in range(width):
+                if cells[col] == " ":
+                    cells[col] = bands[(tick + col + i) % len(bands)]
+            out.append("".join(cells)[:width])
+        return out
+    # Block-center the ASCII box, then animate ANSI bands in the side margins.
     # (a one-column breathing gap keeps the centered text clean).
     block_w = max((len(row) for row in rows), default=0)
     left = max(0, (width - block_w) // 2)
@@ -2438,8 +2619,11 @@ def bar(value: Any, width: int = 10) -> str:
         pct = max(0.0, min(100.0, float(value)))
     except (TypeError, ValueError):
         pct = 0.0
-    filled = int(round((pct / 100.0) * width))
-    return chr(0x2595) + (chr(0x2588) * filled) + (chr(0x2591) * (width - filled)) + chr(0x258F)
+    w = max(4, int(width))
+    inner = max(0, w - 2)
+    filled = int(round((pct / 100.0) * inner)) if inner else 0
+    empty = max(0, inner - filled)
+    return chr(0x2595) + (chr(0x2588) * filled) + (chr(0x2591) * empty) + chr(0x258F)
 
 
 def compact_bar(value: Any, width: int = 6) -> str:
@@ -2692,12 +2876,23 @@ def _line_ends_complete_thought(text: str) -> bool:
     clean = re.sub(r"\s+", " ", str(text or "")).strip()
     if not clean:
         return False
+    if clean.endswith("..."):
+        return True
     if clean[-1] in ".!?":
         return True
     if clean[-1] in ",;:":
         return True
     last = clean.rsplit(" ", 1)[-1].lower().rstrip(".,!?;:")
     return last not in LCD_EVENT_DANGLING_WORDS
+
+
+def _mark_truncated_line(line: str, room: int) -> str:
+    text = re.sub(r"\s+", " ", str(line or "")).strip()
+    if not text or text.endswith("..."):
+        return text[:room] if len(text) > room else text
+    if len(text) + 3 <= room:
+        return text + "..."
+    return text[: max(0, room - 3)].rstrip() + "..."
 
 
 def _fit_event_body_lines(
@@ -2712,23 +2907,43 @@ def _fit_event_body_lines(
         return [""]
     full = _wrap_event_body(clean, first_width, cont_width, 999)
     if len(full) <= max(1, max_lines):
-        return full
+        return full[: max(1, max_lines)]
+
+    # Roomy budgets: wrap across rows instead of early clip_sentence chop.
+    if max_lines >= 6:
+        lines = full[:max_lines]
+        while len(lines) > 1 and not _line_ends_complete_thought(lines[-1]):
+            lines.pop()
+        if len(full) > len(lines) and lines:
+            room = cont_width if len(lines) > 1 else first_width
+            lines[-1] = _mark_truncated_line(lines[-1], room)
+        return lines
 
     budget = max(first_width, first_width + cont_width * max(0, max_lines - 1))
     while budget >= first_width:
         clipped = clip_sentence(clean, budget)
         lines = _wrap_event_body(clipped, first_width, cont_width, max(1, max_lines))
         if len(lines) <= max(1, max_lines) and _line_ends_complete_thought(lines[-1]):
-            return lines[: max(1, max_lines)]
+            out = lines[: max(1, max_lines)]
+            if clipped != clean and out:
+                room = cont_width if len(out) > 1 else first_width
+                out[-1] = _mark_truncated_line(out[-1], room)
+            return out
         budget = int(budget * 0.82)
 
     for take in range(min(max_lines, len(full)), 0, -1):
         lines = full[:take]
         if _line_ends_complete_thought(lines[-1]):
+            if take < len(full) and lines:
+                room = cont_width if take > 1 else first_width
+                lines[-1] = _mark_truncated_line(lines[-1], room)
             return lines
 
     one = clip_sentence(clean, first_width)
-    return _wrap_event_body(one, first_width, cont_width, 1)[:1] or [""]
+    lines = _wrap_event_body(one, first_width, cont_width, 1)[:1] or [""]
+    if lines and len(clean) > len(lines[0].replace("...", "")):
+        lines[0] = _mark_truncated_line(lines[0], first_width)
+    return lines
 
 
 EventDrawRow = tuple[
@@ -2765,18 +2980,42 @@ def compact_event_draw_rows(
         if base == newest_base:
             compact.extend(chunk)
         else:
-            compact.extend(chunk[-max(1, older_tail_lines) :])
+            limit = (
+                LCD_EVENT_OLD_NARRATIVE_LINES
+                if _event_base_kind(base) in NARRATIVE_EVENT_KINDS
+                else max(older_tail_lines, LCD_EVENT_OLD_CHATTER_LINES)
+                if _event_base_kind(base) in ("message", "action")
+                else older_tail_lines
+            )
+            compact.extend(_older_event_slice(chunk, base, limit))
     if len(compact) <= slots:
         return compact
     newest_rows = grouped.get(newest_base, [])
     if len(newest_rows) >= slots:
-        return newest_rows[-slots:]
+        tail = newest_rows[-slots:]
+        if len(newest_rows) > slots and tail:
+            prefix, body, line_key, event_base, sort_ts, typeable = tail[-1]
+            body_text = "".join(text for text, _style in body)
+            if body_text and not body_text.endswith("..."):
+                room = max(1, WIDTH - sum(len(text) for text, _style in prefix))
+                marked = _mark_truncated_line(body_text, room)
+                if marked != body_text:
+                    style = body[0][1] if body else "IRC_MSG"
+                    tail[-1] = (prefix, [(marked, style)], line_key, event_base, sort_ts, typeable)
+        return tail
     budget = slots - len(newest_rows)
     trimmed: list[EventDrawRow] = []
     for base in order:
         if base == newest_base:
             continue
-        for row in grouped[base][-max(1, older_tail_lines) :]:
+        limit = (
+            LCD_EVENT_OLD_NARRATIVE_LINES
+            if _event_base_kind(base) in NARRATIVE_EVENT_KINDS
+            else max(older_tail_lines, LCD_EVENT_OLD_CHATTER_LINES)
+            if _event_base_kind(base) in ("message", "action")
+            else older_tail_lines
+        )
+        for row in _older_event_slice(grouped[base], base, limit):
             if len(trimmed) >= budget:
                 break
             trimmed.append(row)
@@ -2912,6 +3151,70 @@ def event_display_rows(
 def _event_body_key(event: LcdEvent) -> str:
     body = re.sub(r"\s+", " ", str(event.text or "")).strip()
     return f"{event.source}|{event.channel}|{event.nick}|{event.kind}|{event.sort_ts}|{body[:96]}"
+
+
+def _event_base_kind(event_base: str) -> str:
+    parts = str(event_base or "").split("|")
+    return parts[3].lower() if len(parts) > 3 else "message"
+
+
+def event_old_max_lines(event: LcdEvent) -> int:
+    kind = str(event.kind or "message").lower()
+    if kind in ("message", "action"):
+        return LCD_EVENT_OLD_CHATTER_LINES
+    if kind in NARRATIVE_EVENT_KINDS or event.source in ("ST", "GMQ"):
+        return LCD_EVENT_OLD_NARRATIVE_LINES
+    return LCD_EVENT_OLD_MAX_LINES
+
+
+def _older_event_slice(chunk: list[EventDrawRow], event_base: str, limit: int) -> list[EventDrawRow]:
+    """Chatter and narration keep the top of the wrap; only status tails use last lines."""
+    take = max(1, limit)
+    kind = _event_base_kind(event_base)
+    if kind in NARRATIVE_EVENT_KINDS or kind in ("message", "action"):
+        return chunk[:take]
+    return chunk[-take:]
+
+
+def event_wrap_line_count(
+    event: LcdEvent,
+    width: int = WIDTH,
+    now: float | None = None,
+) -> int:
+    ts = time.time() if now is None else now
+    return len(event_display_entries(event, width, now=ts, max_body_lines=999))
+
+
+def build_event_zone_rows(
+    events: list[LcdEvent],
+    slots: int,
+    width: int = WIDTH,
+    now: float | None = None,
+) -> list[EventDrawRow]:
+    """Fill the EVENTS zone bottom-up: expand newest wraps to use spare rows."""
+    ts = time.time() if now is None else now
+    if slots <= 0 or not events:
+        return []
+    cap = max(8, min(len(events), LCD_EVENTS_ON_SCREEN))
+    batch = list(events)[-cap:]
+    newest_base = _event_body_key(batch[-1])
+    newest_full = event_wrap_line_count(batch[-1], width, ts)
+    reserve = max(0, len(batch) - 1)
+    newest_budget = min(newest_full, max(1, slots - reserve))
+
+    def _assemble(newest_lines: int) -> list[EventDrawRow]:
+        rows: list[EventDrawRow] = []
+        for event in batch:
+            is_newest = _event_body_key(event) == newest_base
+            max_lines = newest_lines if is_newest else event_old_max_lines(event)
+            rows.extend(event_display_entries(event, width, now=ts, max_body_lines=max_lines))
+        return compact_event_draw_rows(rows, slots, newest_base)
+
+    out = _assemble(newest_budget)
+    spare = slots - len(out)
+    if spare > 0 and newest_budget < newest_full:
+        out = _assemble(min(newest_full, newest_budget + spare))
+    return out
 
 
 def event_display_entries(
@@ -3190,7 +3493,7 @@ def _agent_summary_fresh(ext: str, summary: str, status: dict[str, Any], now: fl
 
 
 def agent_ticker_bits(status: dict[str, Any], now: float | None = None) -> list[str]:
-    """Call-summary one-liners for Navi, Simon, Lawyer — only while fresh."""
+    """Call-summary one-liners for mesh PBX agents — only while fresh."""
     ts = time.time() if now is None else now
     bits: list[str] = []
     agent_tickers = as_dict(status.get("agent_tickers"))
@@ -3198,7 +3501,7 @@ def agent_ticker_bits(status: dict[str, Any], now: float | None = None) -> list[
     phone_summaries = pbx_phone_summary_map(status)
     navi = as_dict(status.get("navi"))
     navi_line = str(navi.get("ticker") or "").strip()
-    for ext, label in (("122", "NAVI"), ("123", "SIMON"), ("130", "LAWYER")):
+    for ext, label in AGENT_TICKER_ROSTER:
         block = agents.get(ext) if isinstance(agents, dict) else None
         summary = ""
         if isinstance(block, dict):
@@ -3208,7 +3511,7 @@ def agent_ticker_bits(status: dict[str, Any], now: float | None = None) -> list[
         if not summary:
             summary = phone_summaries.get(ext, "")
         if summary and _agent_summary_fresh(ext, summary, status, ts):
-            bits.append(f"{label} {short_text(summary, 56)}")
+            bits.append(f"{label} {normalize_line(summary)}")
     return bits
 
 
@@ -3401,15 +3704,15 @@ def uptime_panel(
     )
 
     rows: list[tuple[str, str]] = [
-        (detail_table_header(width), "CYAN"),
-        (detail_table_rule(width), "SYS"),
+        (uptime_table_header(width), "CYAN"),
+        (uptime_table_rule(width), "SYS"),
     ]
     longest_label = "?"
     longest_host: dict[str, Any] = {}
     longest_uptime = -1
-    for label, host, style, disk_path in host_specs:
+    for label, host, style, _disk_path in host_specs:
         if not host:
-            rows.append((vitals_row(label, None, None, None, None, width), "SYS"))
+            rows.append((uptime_host_row(label, None, width), "SYS"))
             continue
         uptime = host.get("uptime_sec")
         try:
@@ -3420,32 +3723,19 @@ def uptime_panel(
             longest_label = label
             longest_host = host
             longest_uptime = uptime_value
-        disk_pct = first_disk_pct(host, disk_path) or first_disk_pct(host)
-        rows.append(
-            (
-                vitals_row(
-                    label,
-                    uptime,
-                    host.get("cpu_pct"),
-                    host.get("mem_pct"),
-                    disk_pct,
-                    width,
-                ),
-                style,
-            )
-        )
+        rows.append((uptime_host_row(label, host, width), style))
 
     ts = time.time() if now is None else now
+    if longest_uptime >= 0:
+        longest_bit = (
+            f"{longest_label} {host_long_name(longest_label, longest_host)} "
+            f"{fmt_uptime(longest_uptime)}"
+        )
+    else:
+        longest_bit = "waiting for telemetry"
     rows.append(
         (
-            detail_kv(
-                "LONGEST UP",
-                f"{host_long_name(longest_label, longest_host)} "
-                f"{fmt_uptime(longest_uptime)} {bar(uptime_pct(longest_uptime), 8)}",
-                width,
-                now=ts,
-                scroll=False,
-            ),
+            detail_kv("LONGEST UP", longest_bit, width, now=ts, scroll=False),
             "NOC",
         )
     )

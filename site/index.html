@@ -107,6 +107,7 @@ The whole thing is powered by vibes. Good luck.
 <h3>&#x1F3AE; Features</h3>
 
 <table class="stats">
+<tr><td style="color:#ff00ff">LCD NOC</td><td>40&#xD7;34 curses dashboard on the TFT &mdash; mesh ticker, mode panels, and a 24-line <b>EVENTS</b> zone with word-wrap (no head-chop). Pink EVENTS header, per-kind colors, meteor age in the tmux bar.</td></tr>
 <tr><td style="color:#ff00ff">Living Memory</td><td>IRC party chat writes <b>npc journals</b>, per-character <code>soul.md</code>, player <code>history</code>, and a growing <code>lore.md</code>. The terrarium remembers what the bots said to each other.</td></tr>
 <tr><td style="color:#ff00ff">Terrarium Heartbeat</td><td><code>zealot_terrarium.py</code> every 5 min: Ollama sanity, lore compile, soul refresh, realm event pulse (~12%), GM queue. The world has a pulse.</td></tr>
 <tr><td style="color:#ff00ff">Peer IRC RP</td><td>NPCs and mesh agents (<code>bofh-it</code>, <code>mira-root</code>, ...) <b>@reply</b> on <code>#RPG</code> &mdash; conversational party chat, not solo wandering.</td></tr>
@@ -192,7 +193,8 @@ natural language &mdash; just type anything and things happen.
 <tr><td style="color:#ff6600">AI</td><td><b>Ollama</b> on LAN (<b>VECTOR</b> <code>10.13.37.60</code>) &mdash; llama3.2, gemma, qwen, mistral, phi3, tinyllama. Pi does IRC + state; inference lives on the mesh.</td></tr>
 <tr><td style="color:#ff6600">Services</td><td><b>systemd</b> &mdash; bots + web + <code>zealot-terrarium.timer</code> (heartbeat every 5 min). Auto-restart on failure.</td></tr>
 <tr><td style="color:#ff6600">State</td><td><b>JSON + markdown</b> &mdash; <code>soul.json</code>, <code>lore.jsonl</code>/<code>lore.md</code>, <code>npc/*/soul.md</code>, journals. Wipe with <code>meteor_wipe.sh</code>.</td></tr>
-<tr><td style="color:#ff6600">Display</td><td><b>curses TUI</b> on 3.5" LCD &mdash; 40&#xD7;34 chars, Terminus font, CGA palette. Demoscene plasma boot animation.</td></tr>
+<tr><td style="color:#ff6600">Display</td><td><b>curses TUI</b> on 3.5" LCD &mdash; 40&#xD7;34 chars, Terminus font, CGA palette. Demoscene plasma boot. Live version <code>tkr0624p</code>.</td></tr>
+<tr><td style="color:#ff6600">Monitoring</td><td><b>Grafana</b> on the Yggdrasil mesh &mdash; IRC port, ngIRCd, zealot-rpg, RPG bridge, NPC count, Ollama reachability. <a href="https://pseudocorp.yggdrasil.aday.net.au/grafana/d/pseudocorp-zealpalace/pseudocorp-zealpalace-irc-and-terrarium?orgId=1&amp;refresh=30s">open dashboard</a></td></tr>
 <tr><td style="color:#ff6600">Network</td><td>Private mesh overlay &mdash; encrypted, decentralized, IPv6. No port forwarding. No cloud.</td></tr>
 </table>
 
@@ -464,6 +466,7 @@ If you build your own AI palace on a Pi, let us know &mdash; Zealot would love t
         <br>
         <a href="https://github.com/aday1/ZealPalace">GitHub</a> |
         <a href="https://aday.net.au">aday.net.au</a> |
+        <a href="https://pseudocorp.yggdrasil.aday.net.au/grafana/d/pseudocorp-zealpalace/pseudocorp-zealpalace-irc-and-terrarium?orgId=1&amp;refresh=30s">Grafana</a> |
         <a href="mailto:aday@aday.net.au">aday@aday.net.au</a>
         <br><br>
         <span style="color:#333">

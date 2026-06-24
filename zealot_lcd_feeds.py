@@ -72,7 +72,7 @@ _REMOTE_LAST_PULL = 0.0
 _REMOTE_LAST_DATA: dict[str, Any] | None = None
 _CELES_STALE_WARN_TS = 0.0
 CELES_STALE_WARN_COOLDOWN_SEC = 900.0
-LCD_EVENT_TEXT_CLIP = 140
+LCD_EVENT_TEXT_CLIP = 560
 
 FEED_NOISE_RE = re.compile(
     r"(?i)(export\s+TERM|zealot_display|display_loop(?:\.sh)?|lcd-init|"
@@ -554,7 +554,7 @@ def celes_events(limit: int = 80) -> tuple[list[LcdEvent], dict[str, Any]]:
         elif chan == "#pseudocorp":
             source = "PCORP"
         nick = short_text(row.get("nick"), 24)
-        text = short_text(row.get("text"), 260)
+        text = clip_sentence(row.get("text"), LCD_EVENT_TEXT_CLIP)
         if feed_line_is_noise(nick, text):
             continue
         events.append(

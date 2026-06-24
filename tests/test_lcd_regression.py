@@ -51,8 +51,14 @@ class LcdRegressionContract(unittest.TestCase):
         self.assertGreaterEqual(LCD_EVENT_MAX_BODY_LINES, 6)
         self.assertGreater(LCD_EVENT_OLD_MAX_LINES, 0)
         self.assertLess(LCD_EVENT_OLD_MAX_LINES, LCD_EVENT_MAX_BODY_LINES)
-        self.assertGreaterEqual(LCD_EVENT_TEXT_CLIP, 100)
-        self.assertLessEqual(LCD_EVENT_TEXT_CLIP, 180)
+        self.assertGreaterEqual(LCD_EVENT_TEXT_CLIP, 200)
+        self.assertLessEqual(LCD_EVENT_TEXT_CLIP, 600)
+
+    def test_meteor_strike_age_label_format(self):
+        from zealot_lcd_render import meteor_strike_age_label
+
+        label = meteor_strike_age_label(now=2_000_000_000.0)
+        self.assertTrue(label.startswith("MET+") or label == "MET ?")
 
     def test_typewriter_not_too_slow(self):
         self.assertGreaterEqual(LCD_TYPEWRITER_CPS, 20.0)
@@ -95,6 +101,49 @@ class LcdRegressionContract(unittest.TestCase):
         lines = _fit_event_body_lines(body, 26, 38, 4)
         self.assertTrue(_line_ends_complete_thought(lines[-1]))
         self.assertNotRegex(lines[-1], r"\bthe\s*$")
+
+    def test_lore_old_budget_shows_ellipsis_not_silent_chop(self):
+        body = (
+            "mesh atmosphere shift: critical levels as packet loss spikes and "
+            "throughput collapses across the terrarium mesh."
+        )
+        lines = _fit_event_body_lines(body, 31, 39, 2)
+        self.assertLessEqual(len(lines), 2)
+        self.assertTrue(lines[-1].endswith("..."))
+
+    def test_narrative_old_events_keep_head_not_tail(self):
+        row = lambda base, idx, kind="message", ts=1.0: (
+            [],
+            [(f"line{idx}", "IRC_MSG")],
+            f"{base}|{idx}",
+            f"ST|bridge:lore|lore|{kind}|{ts}|body",
+            ts,
+            False,
+        )
+        lore_base = "ST|bridge:lore|lore|lore|1.0|body"
+        rows = [row(lore_base, 0, "lore"), row(lore_base, 1, "lore"), row(lore_base, 2, "lore")]
+        out = compact_event_draw_rows(rows, 2, "other|#RPG|x|message|9|fresh")
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0][2], f"{lore_base}|0")
+
+    def test_build_event_zone_rows_fills_slots(self):
+        from zealot_lcd_render import build_event_zone_rows
+
+        slots = 12
+        events = [
+            LcdEvent("RPG", "#RPG", "A", "older one-liner", sort_ts=1.0),
+            LcdEvent(
+                "RPG",
+                "#RPG",
+                "B",
+                "fresh " + ("word " * 80),
+                kind="message",
+                sort_ts=2.0,
+            ),
+        ]
+        rows = build_event_zone_rows(events, slots, WIDTH, now=100.0)
+        self.assertGreaterEqual(len(rows), min(slots, 6))
+        self.assertEqual(rows[-1][3], _event_body_key(events[-1]))
 
     def test_newest_event_keeps_wrap_rows(self):
         row = lambda base, idx, ts=1.0: (

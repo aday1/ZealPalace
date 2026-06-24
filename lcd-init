@@ -24,14 +24,14 @@ tmux new-session -d -s "$SESSION" -x "$LCD_COLS" -y "$TMUX_ROWS" \
 tmux set-option -t "$SESSION" window-size smallest 2>/dev/null
 tmux set-window-option -t "$SESSION" aggressive-resize on 2>/dev/null
 
-# Mesh status bar — hide tmux window list (was leaking as "2:$" on the TFT)
-tmux set-option -t "$SESSION" status-style 'bg=black,fg=green' 2>/dev/null
+# Mesh status bar — black row, high-contrast text (cyan/green on green was unreadable on TFT)
+tmux set-option -t "$SESSION" status-style 'bg=black,fg=white' 2>/dev/null
 tmux set-option -t "$SESSION" status-left '' 2>/dev/null
 tmux set-option -t "$SESSION" status-left-length 0 2>/dev/null
 tmux set-window-option -t "$SESSION" window-status-format '' 2>/dev/null
 tmux set-window-option -t "$SESSION" window-status-current-format '' 2>/dev/null
 tmux set-option -t "$SESSION" status-justify left 2>/dev/null
-tmux set-option -t "$SESSION" status-right "#[fg=green]${HOST_SHORT} ${LAN_IP} #[fg=yellow]%I:%M %p" 2>/dev/null
+tmux set-option -t "$SESSION" status-right "#[fg=white]${LAN_IP} #[fg=yellow]${HOST_SHORT}" 2>/dev/null
 tmux set-option -t "$SESSION" status-right-length 40 2>/dev/null
 tmux set-option -t "$SESSION" message-style 'bg=black,fg=yellow,bold' 2>/dev/null
 tmux set-option -t "$SESSION" pane-border-style 'fg=blue' 2>/dev/null

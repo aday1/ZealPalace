@@ -29,15 +29,19 @@ from zealot_lcd_render import (
     top_status_segments,
     wopr_header_segments,
     ticker_scroll_body,
+    header_ticker_line,
+    header_ticker_segments,
     weekend_monday_countdown_segments,
     chunky_scroller,
     comet_line,
+    comet_line_segments,
     demoscene_fx_row,
     dashboard_footer_segments,
     event_segments,
     event_display_rows,
     event_display_entries,
     compact_event_draw_rows,
+    build_event_zone_rows,
     _event_body_key,
     LcdTypewriter,
     _segments_content_chars,
@@ -458,18 +462,15 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         wopr_header_segments(panel_mode, now, frame_w),
         now=now,
     )
-    add_line(
+    add_segment_line(
         stdscr,
         zones["header_start"] + 2,
-        chunky_scroller(
+        header_ticker_segments(
             ticker_scroll_body(snapshot, now),
             anim_now(now),
             frame_w,
             speed=TICKER_SCROLLER_SPEED,
         ),
-        "NOC",
-        bold=True,
-        raw=True,
         now=now,
     )
 
@@ -513,7 +514,12 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     add_line(stdscr, zones["fx_row"], demoscene_fx_row(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
 
     # --- Events zone (reserved rows, tail-pinned, typewriter on newest line only) ---
-    add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
+    add_segment_line(
+        stdscr,
+        zones["events_hdr"],
+        comet_line_segments("EVENTS", now + 2.0, frame_w),
+        now=now + 2.0,
+    )
     raw_events = [
         event
         for event in (snapshot.get("events") or [])
@@ -526,18 +532,8 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         if ts >= newest_ts:
             newest_ts = ts
             newest_base = _event_body_key(event)
-    event_draw_rows: list[tuple[list[tuple[str, str]], list[tuple[str, str]], str, str, float, bool]] = []
-    for event in raw_events:
-        max_lines = (
-            LCD_EVENT_MAX_BODY_LINES
-            if _event_body_key(event) == newest_base
-            else LCD_EVENT_OLD_MAX_LINES
-        )
-        event_draw_rows.extend(
-            event_display_entries(event, frame_w, now=now, max_body_lines=max_lines)
-        )
     event_slots = max(1, zones["events_end"] - zones["events_start"])
-    event_draw_rows = compact_event_draw_rows(event_draw_rows, event_slots, newest_base)
+    event_draw_rows = build_event_zone_rows(raw_events, event_slots, frame_w, now=now)
     prep: list[tuple[str, int]] = []
     for prefix, body, line_key, event_base, _sort_ts, typeable in event_draw_rows:
         if typeable and event_base == newest_base:
@@ -546,6 +542,8 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     _EVENT_TYPEWRITER.prune(active_keys)
     _EVENT_TYPEWRITER.prepare(prep, now)
     start_row = zones["events_end"] - len(event_draw_rows)
+    for clear_row in range(zones["events_start"], start_row):
+        draw_raw(stdscr, clear_row, " " * frame_w, PAIR_BORDER, curses.A_DIM)
     for idx, (prefix, body, line_key, event_base, _sort_ts, typeable) in enumerate(event_draw_rows):
         row = start_row + idx
         if row < zones["events_start"] or row >= zones["events_end"]:
