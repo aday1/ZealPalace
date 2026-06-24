@@ -912,15 +912,25 @@ def _event_norm_tokens(text: str) -> tuple[str, set[str]]:
 
 def dedupe_events(items: Iterable[LcdEvent], limit: int = 80) -> list[LcdEvent]:
     seen: set[tuple[str, str, str, str]] = set()
+    content_seen: set[tuple[str, str]] = set()
     kept_norms: list[tuple[str, set[str]]] = []
     out: list[LcdEvent] = []
     for item in sorted(items, key=lambda ev: (ev.sort_ts, ev.priority)):
         key = item.key()
         if key in seen:
             continue
+        norm, toks = _event_norm_tokens(item.text)
+        # Same speaker + same words on ANY channel -> show once. This kills the
+        # cross-channel double when a bot posts identically to #RPG and
+        # #macroverse-rpg (the LCD taps both).
+        nick_l = str(getattr(item, "nick", "") or "").rstrip("_").lower()
+        if norm:
+            csig = (nick_l, norm)
+            if csig in content_seen:
+                continue
+            content_seen.add(csig)
         # Collapse near-duplicate prose (e.g. "<keep> stands cold and silent"
         # repeated across hosts/personas). Conservative: long lines, high overlap.
-        norm, toks = _event_norm_tokens(item.text)
         if len(norm) > 30 and toks:
             dup = False
             for prev_norm, prev_toks in kept_norms[-12:]:
