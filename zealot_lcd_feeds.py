@@ -941,6 +941,7 @@ def _event_norm_tokens(text: str) -> tuple[str, set[str]]:
 def dedupe_events(items: Iterable[LcdEvent], limit: int = 80) -> list[LcdEvent]:
     seen: set[tuple[str, str, str, str]] = set()
     content_seen: set[tuple[str, str]] = set()
+    text_seen: set[str] = set()
     kept_norms: list[tuple[str, set[str]]] = []
     out: list[LcdEvent] = []
     for item in sorted(items, key=lambda ev: (ev.sort_ts, ev.priority)):
@@ -948,9 +949,11 @@ def dedupe_events(items: Iterable[LcdEvent], limit: int = 80) -> list[LcdEvent]:
         if key in seen:
             continue
         norm, toks = _event_norm_tokens(item.text)
-        # Same speaker + same words on ANY channel -> show once. This kills the
-        # cross-channel double when a bot posts identically to #RPG and
-        # #macroverse-rpg (the LCD taps both).
+        # Same words from any nick/source/channel -> show once (kills tap+log double feed).
+        if norm and len(norm) >= 12:
+            if norm in text_seen:
+                continue
+            text_seen.add(norm)
         nick_l = str(getattr(item, "nick", "") or "").rstrip("_").lower()
         if norm:
             csig = (nick_l, norm)
@@ -1014,9 +1017,10 @@ def collect_snapshot(irc_tap: IrcTap | None = None, limit: int = 80) -> dict[str
     statuses = status_files()
 
     source_events: list[LcdEvent] = []
-    if direct_events:
+    tap_ok = bool(direct_events) and bool(direct_status.get("ok"))
+    if tap_ok:
         source_events.extend(direct_events)
-    if c_status.get("fresh"):
+    elif c_status.get("fresh"):
         source_events.extend(c_events)
     else:
         now_ts = time.time()

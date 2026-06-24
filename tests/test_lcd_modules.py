@@ -219,13 +219,22 @@ class LcdRenderTests(unittest.TestCase):
     def test_event_body_color_by_type(self):
         talk = LcdEvent("ZP", "#RPG", "Yomiko", "hello friends", sort_ts=1.0)
         action = LcdEvent("RPG", "#RPG", "Hex", "wanders the spire", kind="action", sort_ts=1.0)
-        realm = LcdEvent("ST", "bridge", "CrystalMesh", "realm pulse rolls in", canon="bridge", sort_ts=1.0)
+        lore = LcdEvent("ST", "bridge", "lore", "realm pulse rolls in", kind="lore", canon="lore", sort_ts=1.0)
+        battle = LcdEvent("ST", "bridge:event", "bridge", "forest | strike", kind="battle", sort_ts=1.0)
         talk_styles = {s for _t, s in event_segments(talk, WIDTH, now=100.0)}
         act_styles = {s for _t, s in event_segments(action, WIDTH, now=100.0)}
-        realm_styles = {s for _t, s in event_segments(realm, WIDTH, now=100.0)}
-        self.assertIn("IRC_MSG", talk_styles)   # talking -> white
-        self.assertIn("GRAY", act_styles)       # actions -> gray
-        self.assertIn("EVT", realm_styles)      # realm/system -> light green
+        lore_styles = {s for _t, s in event_segments(lore, WIDTH, now=100.0)}
+        battle_styles = {s for _t, s in event_segments(battle, WIDTH, now=100.0)}
+        self.assertIn("IRC_MSG", talk_styles)
+        self.assertIn("GRAY", act_styles)
+        self.assertIn("ST", lore_styles)
+        self.assertIn("RED", battle_styles)
+
+    def test_dedupe_same_text_any_source(self):
+        a = LcdEvent("RPG", "#RPG", "DM", "The realms atmosphere shifts today", sort_ts=1.0)
+        b = LcdEvent("IRC", "#RPG", "DungeonMaster", "The realms atmosphere shifts today", sort_ts=1.1)
+        out = dedupe_events([a, b])
+        self.assertEqual(len(out), 1)
 
     def test_event_typewriter_cursor_while_typing(self):
         event = LcdEvent("ZP", "#RPG", "Yomiko", "lets raid the caves", sort_ts=1.0)

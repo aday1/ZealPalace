@@ -121,7 +121,7 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0624e"
+LCD_TICKER_VERSION = "tkr0624f"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -2625,6 +2625,7 @@ def event_prefix_segments(
     canon = event_canon_suffix(event)
     if canon:
         parts.append((canon, "SYS"))
+    parts.extend(event_kind_badge(event))
     return parts
 
 
@@ -2688,6 +2689,59 @@ def _event_is_realm(event: LcdEvent) -> bool:
     return canon in ("bridge", "queued", "sillytavern", "lore", "realm", "gm", "ops", "world")
 
 
+EVENT_KIND_STYLES: dict[str, str] = {
+    "message": "IRC_MSG",
+    "action": "GRAY",
+    "lore": "ST",
+    "battle": "RED",
+    "travel": "CYAN",
+    "weather": "ART",
+    "realm": "GREEN",
+    "realm_event": "GREEN",
+    "meteor": "RED",
+    "plague": "MAG",
+    "blessing": "YELLOW",
+    "eclipse": "RGB",
+    "festival": "MOTD",
+    "invasion": "RED",
+    "earthquake": "YELLOW",
+    "gold_rain": "MOTD",
+    "death": "RED",
+    "birth": "YELLOW",
+    "marriage": "MAG",
+    "notice": "LOG",
+    "react": "ZH",
+    "rebirth": "GREEN",
+    "gm_queue": "GMQ",
+    "gm": "GMQ",
+    "bridge": "ST",
+    "status": "SYS",
+    "pbx": "PBX",
+    "rpg": "RPG",
+}
+
+
+def event_msg_style(event: LcdEvent) -> str:
+    kind = str(event.kind or "message").lower()
+    body = re.sub(r"\s+", " ", str(event.text or "")).strip().lower()
+    if "atmosphere shifts" in body:
+        return "ART"
+    if kind in EVENT_KIND_STYLES:
+        return EVENT_KIND_STYLES[kind]
+    if kind == "message" and not _event_is_realm(event):
+        return "IRC_MSG"
+    idx = sum(ord(ch) for ch in (kind or "evt")) % len(COMPANION_LINE_COLORS)
+    return COMPANION_LINE_COLORS[idx]
+
+
+def event_kind_badge(event: LcdEvent) -> list[tuple[str, str]]:
+    kind = str(event.kind or "message").lower()
+    if kind in ("message", "presence", "status", "action"):
+        return []
+    label = kind.replace("_", " ")[:8].upper()
+    return [(f"{label} ", event_msg_style(event))]
+
+
 def event_nick_style(event: LcdEvent) -> str:
     nick = _event_nick_label(event).lower().rstrip("_")
     if nick in IRC_NICK_STYLES:
@@ -2721,13 +2775,7 @@ def event_display_rows(
 
     meta = event_prefix_segments(event, now_ts, width)
     nick_segments: list[tuple[str, str]] = []
-    # Body color by event type: talking=white, actions=gray, realm/system=light green.
-    if event.kind == "action":
-        msg_style = "GRAY"
-    elif event.kind != "message" or _event_is_realm(event):
-        msg_style = "EVT"
-    else:
-        msg_style = "IRC_MSG"
+    msg_style = event_msg_style(event)
     # Bracketed bright nick ONLY for real chatter (someone speaking/acting).
     # Lore/GM/bridge/status events are narration, not a speaker -- no fake nick.
     if nick and event.kind in ("message", "action"):
@@ -2779,12 +2827,7 @@ def event_display_entries(
 
     meta = event_prefix_segments(event, now_ts, width)
     nick_segments: list[tuple[str, str]] = []
-    if event.kind == "action":
-        msg_style = "GRAY"
-    elif event.kind != "message" or _event_is_realm(event):
-        msg_style = "EVT"
-    else:
-        msg_style = "IRC_MSG"
+    msg_style = event_msg_style(event)
     if nick and event.kind in ("message", "action"):
         nick_segments = [("[", nick_style), (nick, nick_style), ("] ", nick_style)]
 
