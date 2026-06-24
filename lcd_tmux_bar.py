@@ -2,8 +2,11 @@
 """Dynamic tmux status bar for the ZealPalace TFT (physical row below curses)."""
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 try:
@@ -11,11 +14,36 @@ try:
 except Exception:  # pragma: no cover - optional on development hosts
     tmux_status_segments = None
 
+try:
+    from zealot_lcd_render import LCD_TICKER_VERSION
+except Exception:  # pragma: no cover - optional on development hosts
+    LCD_TICKER_VERSION = "tkr?"
+
 _SESSION = "lcd"
 _LAST_KEY = ""
 _LAYOUT_DONE = False
 # Header row uses 24h (ZEAL HH:MM:SS); physical tmux bar uses 12h.
 TMUX_TIME_FMT = "%I:%M %p"
+# Files rewritten on every deploy -- newest mtime is the last-deploy time.
+_DEPLOY_STAMP_FILES = (
+    "~/.local/bin/zealot_lcd_render.py",
+    "~/.local/bin/zealot_display.py",
+)
+
+
+def _build_stamp() -> tuple[str, str]:
+    """LCD ticker version + last-deploy date/time (from the deployed file mtime)."""
+    dep = "?"
+    newest = 0.0
+    for cand in _DEPLOY_STAMP_FILES:
+        try:
+            mt = Path(os.path.expanduser(cand)).stat().st_mtime
+            newest = max(newest, mt)
+        except OSError:
+            continue
+    if newest > 0:
+        dep = datetime.fromtimestamp(newest).strftime("%b%d %H:%M")
+    return LCD_TICKER_VERSION, dep
 
 
 def _lan_ip() -> str:
@@ -54,11 +82,12 @@ def _ensure_tmux_layout() -> None:
     _LAYOUT_DONE = True
     for args in (
         ["tmux", "set-option", "-t", _SESSION, "status-left", ""],
-        ["tmux", "set-option", "-t", _SESSION, "status-left-length", "0"],
+        ["tmux", "set-option", "-t", _SESSION, "status-left-length", "24"],
         ["tmux", "set-window-option", "-t", _SESSION, "window-status-format", ""],
         ["tmux", "set-window-option", "-t", _SESSION, "window-status-current-format", ""],
+        ["tmux", "set-option", "-t", _SESSION, "window-status-separator", ""],
         ["tmux", "set-option", "-t", _SESSION, "status-justify", "left"],
-        ["tmux", "set-option", "-t", _SESSION, "status-right-length", "40"],
+        ["tmux", "set-option", "-t", _SESSION, "status-right-length", "24"],
     ):
         _tmux_run(args)
 
@@ -86,14 +115,14 @@ def _build_status(
         right = f"#[fg=green]{host} {ip} #[fg=yellow]{TMUX_TIME_FMT}"
         return left, right
 
-    # Bottom physical row: IP + hostname + 12h time only. The mesh status
-    # (TERR 6/6 VEC PBX WAN) lives on the curses status line just above, so we
-    # do NOT repeat it here.
+    # Bottom physical row: LCD version + last-deploy stamp on the left, IP +
+    # live 12h clock on the right. (Mesh status stays on the curses line above.)
     if tmux_status_segments is not None and snapshot is not None:
         _plain_left, plain_ip = tmux_status_segments(snapshot, mode)
         ip = plain_ip or ip
-    left = f"#[fg=green]{ip}#[default] #[fg=cyan]{host}#[default]"
-    right = f"#[fg=yellow]{TMUX_TIME_FMT}"
+    ver, dep = _build_stamp()
+    left = f"#[fg=yellow,bold]{ver}#[default] #[fg=cyan]{dep}#[default]"
+    right = f"#[fg=green]{ip}#[fg=yellow] {TMUX_TIME_FMT}"
     return left, right
 
 
@@ -113,5 +142,8 @@ def set_tmux_bar(
         return
     _LAST_KEY = key
     _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-left", left])
-    _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-left-length", "28"])
+    _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-left-length", "24"])
     _tmux_run(["tmux", "set-option", "-t", _SESSION, "status-right", right])
+    # Keep the tmux window list ('2:$-' junk) blanked even after window churn.
+    _tmux_run(["tmux", "set-window-option", "-t", _SESSION, "window-status-format", ""])
+    _tmux_run(["tmux", "set-window-option", "-t", _SESSION, "window-status-current-format", ""])

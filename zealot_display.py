@@ -238,18 +238,20 @@ def attr_for(style: str, bold: bool = False, now: float | None = None, row: int 
         "IRC_MSG": PAIR_IRC_MSG,
         "IRC_ACT": PAIR_MAG,
         "IRC_NICK": PAIR_YELLOW,
+        "GRAY": PAIR_DIM,
+        "EVT": PAIR_GREEN,
         "SCROLLER": PAIR_MOTD,
         "BANNER": PAIR_MAG,
         "RASTER": PAIR_BORDER,
     }.get(style, PAIR_LOG)
     attr = curses.color_pair(pair)
-    if style in ("SYS", "IRC_TIME"):
+    if style in ("SYS", "IRC_TIME", "GRAY"):
         attr |= curses.A_DIM
     if style in ("TITLE", "TAB_ON", "CYAN"):
         attr |= curses.A_BOLD
     if style in ("MOTD", "GREETZ", "MOTIVE", "IRC_MSG"):
         attr |= curses.A_BOLD
-    if style in ("IRC_CHAN", "IRC_NICK", "ZP", "ZH", "RPG", "ST", "PBX", "NOC", "CYAN", "MAG", "RGB", "GREEN", "YELLOW", "RED", "TICK", "ART", "LOG", "GMQ"):
+    if style in ("IRC_CHAN", "IRC_NICK", "ZP", "ZH", "RPG", "ST", "PBX", "NOC", "CYAN", "MAG", "RGB", "GREEN", "YELLOW", "RED", "TICK", "ART", "LOG", "GMQ", "EVT"):
         attr |= curses.A_BOLD
     if style == "MOTD_FX":
         attr |= curses.A_DIM

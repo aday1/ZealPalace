@@ -191,9 +191,10 @@ class LcdRenderTests(unittest.TestCase):
         text = "".join(part for part, _style in segments)
         self.assertIn("IRC_TIME", styles)
         self.assertIn("ZP", styles)
+        self.assertIn("IRC_MSG", styles)
         self.assertIn("[1m]", text)
         self.assertNotRegex(text, r"\[\d{2}:\d{2}\]")
-        self.assertIn("Zealot:", text)
+        self.assertIn("[Zealot]", text)
         self.assertNotIn("[#", text)
         self.assertLessEqual(sum(len(part) for part, _style in segments), WIDTH)
 
@@ -209,7 +210,7 @@ class LcdRenderTests(unittest.TestCase):
         nick = "VeryLongNickName"
         event = LcdEvent("ZP", "#ZealPalace", nick, "hi", sort_ts=1.0)
         text = "".join(part for part, _style in event_segments(event, WIDTH, now=100.0))
-        self.assertIn(nick + ":", text)
+        self.assertIn("[" + nick + "]", text)
         self.assertNotIn("...", text)
 
     def test_uptime_slide_fits_width(self):

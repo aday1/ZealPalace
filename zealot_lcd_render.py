@@ -121,7 +121,7 @@ ANIM_STEP_SEC = 5.0
 MARQUEE_SPEED = 1.8
 SCROLLER_SPEED = 1.2
 TICKER_SCROLLER_SPEED = 0.58
-LCD_TICKER_VERSION = "tkr0624a"
+LCD_TICKER_VERSION = "tkr0624b"
 TICKER_FRAME_PERIOD_SEC = 8.0
 FLOURISH_BURST_PERIOD_SEC = 12.0
 FLOURISH_BURST_WINDOW_SEC = 2.5
@@ -268,7 +268,6 @@ COMPANION_LINE_COLORS: tuple[str, ...] = (
     "GMQ",
     "TICK",
     "ART",
-    "LOG",
 )
 
 
@@ -2664,6 +2663,12 @@ def _event_nick_label(event: LcdEvent) -> str:
     return (event.nick or event.channel.strip("#") or event.kind or "").strip()
 
 
+def _event_is_realm(event: LcdEvent) -> bool:
+    """Realm / world / bridge / system event (rendered light green, not chatter white)."""
+    canon = str(getattr(event, "canon", "") or "").lower()
+    return canon in ("bridge", "queued", "sillytavern", "lore", "realm", "gm", "ops", "world")
+
+
 def event_nick_style(event: LcdEvent) -> str:
     nick = _event_nick_label(event).lower().rstrip("_")
     if nick in IRC_NICK_STYLES:
@@ -2697,13 +2702,16 @@ def event_display_rows(
 
     meta = event_prefix_segments(event, now_ts, width)
     nick_segments: list[tuple[str, str]] = []
-    msg_style = nick_style if nick else "IRC_MSG"
+    # Body color by event type: talking=white, actions=gray, realm/system=light green.
     if event.kind == "action":
-        msg_style = "IRC_ACT" if not nick else nick_style
-        if nick:
-            nick_segments = [(" *", nick_style), (nick, nick_style), (" ", nick_style)]
-    elif event.kind not in ("presence", "status") and nick:
-        nick_segments = [(" ", nick_style), (nick, nick_style), (": ", nick_style)]
+        msg_style = "GRAY"
+    elif event.kind != "message" or _event_is_realm(event):
+        msg_style = "EVT"
+    else:
+        msg_style = "IRC_MSG"
+    # Username highlighted in a bracket of its own unique bright color.
+    if nick and event.kind not in ("presence", "status"):
+        nick_segments = [("[", nick_style), (nick, nick_style), ("] ", nick_style)]
 
     prefix_len = sum(len(text) for text, _style in meta + nick_segments)
     first_room = max(1, width - prefix_len)
