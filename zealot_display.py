@@ -31,6 +31,7 @@ from zealot_lcd_render import (
     weekend_monday_countdown_segments,
     chunky_scroller,
     comet_line,
+    demoscene_fx_row,
     dashboard_footer_segments,
     event_segments,
     event_display_rows,
@@ -428,8 +429,13 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
         and _sip_overlay_allowed(sip_flash)
     )
     set_tmux_bar(snapshot=snapshot, mode=mode)
+    # Live PBX call: full-screen transcript takeover (mesh dashboard resumes after hangup).
+    if sip_active and sip_flash is not None:
+        draw_sip_overlay(stdscr, sip_flash, now, input_row)
+        stdscr.refresh()
+        return
     call_exts = set(getattr(sip_flash, "active_exts", set()) or ()) if sip_flash is not None else set()
-    panel_mode = "agents" if sip_active else mode
+    panel_mode = mode
     zones = lcd_frame_zones(frame_h)
 
     # --- Header (3 rows): ZEAL clock, WOPR/DEFCON, rotating mesh ticker ---
@@ -458,15 +464,15 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     # --- WORK / TO-MON phase row with ANSI progress bar ---
     add_segment_line(stdscr, zones["mode_bar"], weekend_monday_countdown_segments(now, frame_w), now=now)
 
-    # --- Compact centered ASCII art (2 rows) ---
+    # --- Centered ANSI mode art (3 rows) ---
     if panel_mode == "agents":
-        art_rows = agents_art_live(snapshot, frame_w)
+        art_rows = agents_art_live(snapshot, frame_w, now=now)
     else:
         art_rows = mode_art_compact(panel_mode, now, frame_w)
     for offset, art_row in enumerate(art_rows):
         add_line(stdscr, zones["art_start"] + offset, art_row, "ART", raw=True, now=now)
 
-    # --- Panel zone (fixed 7 rows): NOC HOST TABLE / agents+transcript / etc. ---
+    # --- Panel zone (fixed 7 rows): NOC HOST TABLE / agents / RPG / lounge / etc. ---
     panel_row = zones["panel_start"]
     for idx, (text, style) in enumerate(
         panel_lines(
@@ -475,7 +481,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
             frame_w,
             now,
             call_exts,
-            sip_flash=sip_flash if sip_active else None,
+            sip_flash=None,
             max_rows=LCD_PANEL_MAX_ROWS,
         )
     ):
@@ -490,6 +496,9 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     # --- Mid footer: calendar week countdown + host/motd scroller ---
     add_segment_line(stdscr, zones["calendar_row"], calendar_segments(now, frame_w), now=now)
     add_segment_line(stdscr, zones["status_row"], dashboard_footer_segments(snapshot, now, tick, frame_w), now=now)
+
+    # --- Demoscene FX strip: rotating greetz / tunnel bus / sparkle / raster ---
+    add_line(stdscr, zones["fx_row"], demoscene_fx_row(snapshot, now, frame_w), "GREETZ", raw=True, now=now)
 
     # --- Events zone (reserved rows, tail-pinned, colored segments) ---
     add_line(stdscr, zones["events_hdr"], comet_line("EVENTS", now + 2.0, frame_w), "GLINT", raw=True, now=now + 2.0)
@@ -511,12 +520,7 @@ def draw(stdscr, snapshot: dict, input_buf: str, now: float, tick: int, sip_flas
     if input_buf:
         input_text = fit("> " + input_buf[-(frame_w - 3) :], frame_w)
     else:
-        if sip_active and sip_flash is not None:
-            headline = str(getattr(sip_flash, "headline", "") or "PBX CALL")[:frame_w]
-            state = str(getattr(sip_flash, "active_state", "") or "active").upper()
-            input_text = fit(f"CALL {headline} | {state} | tail live", frame_w)
-        else:
-            input_text = lcd_status_line(snapshot, mode, now, frame_w)
+        input_text = lcd_status_line(snapshot, mode, now, frame_w)
     add_line(stdscr, zones["input_row"], input_text, "INPUT", bold=True, now=now)
     stdscr.refresh()
 

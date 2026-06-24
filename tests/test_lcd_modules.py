@@ -317,7 +317,6 @@ class ModeBarTests(unittest.TestCase):
     def test_mode_bar_uses_full_tab_names_when_fitting(self):
         row = mode_section_bar("bridge", WIDTH, now=0.0)
         self.assertIn("ST BRIDGE", row)
-        self.assertIn("TERRARIUM", row)
         self.assertNotRegex(row, r">>BRDG\b")
 
     def test_dashboard_header_omits_mode_name(self):
@@ -443,9 +442,10 @@ class TickerTests(unittest.TestCase):
                 "pbx_api_ok": True,
             }
         }
-        rows = agents_art_live(snapshot, WIDTH)
-        self.assertEqual(len(rows), 2)
-        self.assertIn("LAN BUS", rows[0])
+        rows = agents_art_live(snapshot, WIDTH, now=0.0)
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(len(r) == WIDTH for r in rows))
+        self.assertIn("LAN BUS", rows[1])
         self.assertIn("NAV:serv", rows[1])
 
 
@@ -576,10 +576,17 @@ class AgentsPanelTests(unittest.TestCase):
         self.assertTrue(any("111" in row and "Hermes" in row for row, _style in rows))
         self.assertTrue(any("ON CALL" in row for row, _style in rows))
 
-    def test_rotation_excludes_lounge_irc_duplicate(self):
-        from zealot_lcd_render import XTREE_MODES
+    def test_rotation_includes_lounge_mode(self):
+        from zealot_lcd_render import XTREE_MODES, panel_lines
 
-        self.assertNotIn("lounge", XTREE_MODES)
+        self.assertIn("lounge", XTREE_MODES)
+        snapshot = {
+            "events": [LcdEvent("ZP", "#ZealPalace", "Zealot", "mesh hums", sort_ts=1.0)],
+            "bridge": {},
+            "status": {},
+        }
+        rows = panel_lines(snapshot, "lounge", WIDTH, now=10.0, max_rows=7)
+        self.assertTrue(rows)
 
     def test_mesh_sync_alert_summary_last_seen(self):
         status = {

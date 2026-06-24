@@ -50,9 +50,10 @@ HEIGHT = 34
 # Fixed TFT frame budget (40x34 TerminusBold14). Prevents header/panel/footer overlap.
 LCD_HEADER_ROWS = 3
 LCD_MODE_BAR_ROWS = 1
-LCD_ART_ROWS = 2
+LCD_ART_ROWS = 3
 LCD_PANEL_MAX_ROWS = 7
 LCD_MID_FOOTER_ROWS = 2
+LCD_FX_ROWS = 1
 LCD_EVENTS_HEADER_ROWS = 1
 LCD_EVENTS_MIN_ROWS = 8
 LCD_EVENT_MAX_BODY_LINES = 4
@@ -156,6 +157,7 @@ XTREE_MODES: tuple[str, ...] = (
     "rgb",
     "agents",
     "bridge",
+    "lounge",
 )
 MODE_TITLES: dict[str, str] = {
     "terrarium": "TERRARIUM",
@@ -1536,6 +1538,8 @@ def lcd_frame_zones(frame_h: int) -> dict[str, int]:
     row += 1
     status_row = row
     row += 1
+    fx_row = row
+    row += LCD_FX_ROWS
     events_hdr = row
     row += LCD_EVENTS_HEADER_ROWS
     events_start = row
@@ -1550,6 +1554,7 @@ def lcd_frame_zones(frame_h: int) -> dict[str, int]:
         "panel_start": panel_start,
         "calendar_row": calendar_row,
         "status_row": status_row,
+        "fx_row": fx_row,
         "events_hdr": events_hdr,
         "events_start": events_start,
         "events_end": events_end,
@@ -1557,14 +1562,14 @@ def lcd_frame_zones(frame_h: int) -> dict[str, int]:
 
 
 MODE_ART_PICK: dict[str, tuple[int, ...]] = {
-    "terrarium": (1, 2),
-    "ops": (1, 2),
-    "uptime": (1, 2),
-    "rpg": (1, 2),
-    "rgb": (1, 2),
-    "agents": (1, 2),
-    "bridge": (0, 1),
-    "lounge": (1, 2),
+    "terrarium": (0, 1, 2),
+    "ops": (0, 1, 2),
+    "uptime": (0, 1, 2),
+    "rpg": (0, 1, 2),
+    "rgb": (0, 1, 2),
+    "agents": (0, 1, 2),
+    "bridge": (0, 1, 2),
+    "lounge": (0, 1, 2),
 }
 
 
@@ -2229,6 +2234,21 @@ def demoscene_greetz(snapshot: dict[str, Any], now: float, width: int = WIDTH) -
     return chunky_scroller(body, anim_now(now, GREETZ_PERIOD_SEC), width, speed=SCROLLER_SPEED * 0.5)
 
 
+FX_ROW_PERIOD_SEC = 9.0
+
+
+def demoscene_fx_row(snapshot: dict[str, Any], now: float, width: int = WIDTH) -> str:
+    """Rotating bottom-strip eye candy: greetz, tunnel bus, sparkle, raster."""
+    phase = int(now // FX_ROW_PERIOD_SEC) % 4
+    if phase == 0:
+        return demoscene_greetz(snapshot, now, width)
+    if phase == 1:
+        return tunnel_line(now, width)
+    if phase == 2:
+        return sparkle_line(now, width)
+    return raster_bar(now, width)
+
+
 def motivational_line(snapshot: dict[str, Any], now: float, width: int = WIDTH) -> str:
     salt = str(as_dict(as_dict(snapshot.get("status")).get("telemetry")).get("remote", ""))
     text = stable_pick(PSEUDOCORP_MOTIVATORS, now, period=MOTIVE_PERIOD_SEC, salt=salt)
@@ -2817,12 +2837,17 @@ def lan_bus_status_line(status: dict[str, Any], width: int = WIDTH) -> str:
     return fit(f"LAN BUS {' '.join(bits)} {vec} {pbx}", width)
 
 
-def agents_art_live(snapshot: dict[str, Any], width: int = WIDTH) -> list[str]:
-    """PBX agents slide: decorative LAN BUS label then live mesh strip directly below."""
+def agents_art_live(snapshot: dict[str, Any], width: int = WIDTH, now: float | None = None) -> list[str]:
+    """PBX agents slide: animated LAN BUS rails + live mesh strip + scrolling roster."""
+    ts = time.time() if now is None else now
     status = snapshot.get("status") or {}
+    tick = int(anim_now(ts, 1.0))
+    rail = "".join("=" if (idx + tick) % 4 else ">" for idx in range(width))
+    roster = "PBX BUS 111 HERMES / 117 HOLYBELL / 122 NAVI / 123 SIMON / 130 LAWYER"
     return [
-        center(" \\__ LAN BUS /__/     ", width),
+        pad(rail, width),
         lan_bus_status_line(status, width),
+        demoscene_bottom_scroller(roster, ts, width, speed=1.4),
     ]
 
 
@@ -2880,6 +2905,8 @@ def panel_lines(
         rows = agents_panel(bridge, status, width, now=ts, call_exts=call_exts, sip_flash=sip_flash)
     elif mode == "bridge":
         rows = bridge_panel(bridge, width, now=ts)
+    elif mode == "lounge":
+        rows = lounge_panel(snapshot.get("events") or [], width, now=ts)
     else:
         rows = bridge_panel(bridge, width, now=ts)
     if max_rows is not None:
