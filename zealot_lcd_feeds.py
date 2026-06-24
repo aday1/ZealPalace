@@ -890,13 +890,35 @@ def read_heartbeat() -> dict[str, Any]:
     return {"ok": True, "age_sec": int(time.time() - raw)}
 
 
+def _event_norm_tokens(text: str) -> tuple[str, set[str]]:
+    norm = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
+    return norm, set(norm.split())
+
+
 def dedupe_events(items: Iterable[LcdEvent], limit: int = 80) -> list[LcdEvent]:
     seen: set[tuple[str, str, str, str]] = set()
+    kept_norms: list[tuple[str, set[str]]] = []
     out: list[LcdEvent] = []
     for item in sorted(items, key=lambda ev: (ev.sort_ts, ev.priority)):
         key = item.key()
         if key in seen:
             continue
+        # Collapse near-duplicate prose (e.g. "<keep> stands cold and silent"
+        # repeated across hosts/personas). Conservative: long lines, high overlap.
+        norm, toks = _event_norm_tokens(item.text)
+        if len(norm) > 30 and toks:
+            dup = False
+            for prev_norm, prev_toks in kept_norms[-12:]:
+                if norm == prev_norm or norm in prev_norm or prev_norm in norm:
+                    dup = True
+                    break
+                union = len(toks | prev_toks)
+                if union and (len(toks & prev_toks) / union) >= 0.72:
+                    dup = True
+                    break
+            if dup:
+                continue
+            kept_norms.append((norm, toks))
         seen.add(key)
         out.append(item)
     return out[-limit:]
