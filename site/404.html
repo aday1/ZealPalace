@@ -5,7 +5,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 — Lost in the Filesystem Dungeon</title>
-<link rel="stylesheet" href="style.css">
+<link id="site-style" rel="stylesheet" href="/ZealPalace/style.css">
+<script>
+(() => {
+  const base = location.hostname.endsWith("github.io") ? "/ZealPalace/" : "/";
+  document.querySelector("#site-style").href = `${base}style.css`;
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelector("#palace-home").href = base;
+  });
+})();
+</script>
 </head>
 <body>
 <div class="palace">
@@ -58,7 +67,7 @@ This location doesn't exist.<br>
 </p>
 
 <p>
-<a href="/" style="color:#ff00ff; font-size:16px; text-decoration:none; border:1px solid #ff00ff; padding:8px 20px; display:inline-block;">
+<a id="palace-home" href="/ZealPalace/" style="color:#ff00ff; font-size:16px; text-decoration:none; border:1px solid #ff00ff; padding:8px 20px; display:inline-block;">
 &#x25C0; Return to the Palace &#x25B6;
 </a>
 </p>
